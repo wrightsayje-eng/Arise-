@@ -1,90 +1,97 @@
-/**
- * =============================================
- *  sqliteDatabase.js
- *  Async sqlite3 wrapper using `sqlite` + `sqlite3`
- *  Exports: initDB(), getRow(), all(), run()
- * =============================================
- */
+// ✨ Dex Database Handler v0.2
+// 📁 File: /root/data/sqliteDatabase.js
+// 🧱 Engine: sqlite3 (Async Mode)
+// 🧠 Purpose: Handles persistent storage for Dex’s data (users, guilds, etc.)
 
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import fs from 'fs';
-import chalk from 'chalk';
 
-const DB_PATH = process.env.SQLITE_PATH || './src/data/botDatabase.sqlite';
+// 🗂️ Ensure the /data directory exists
+const dataDir = path.resolve('./data');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-export let db; // will be assigned after init
+// 📌 Define DB path
+const dbPath = path.join(dataDir, 'dexbot.sqlite');
 
-export async function initDB() {
-  // ensure folder exists
-  const folder = path.dirname(DB_PATH);
-  if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
-
-  db = await open({
-    filename: DB_PATH,
-    driver: sqlite3.Database
+// ⚡ Open SQLite connection (async)
+export async function getDatabase() {
+  const db = await open({
+    filename: dbPath,
+    driver: sqlite3.Database,
   });
 
-  // Recommended PRAGMA for concurrency/performance
-  try {
-    await db.exec('PRAGMA journal_mode = WAL;');
-  } catch (e) {
-    console.warn(chalk.yellow('[SQLITE] Warning setting WAL mode:'), e?.message || e);
-  }
-
-  // create tables (idempotent)
+  // 🧱 Initialize tables
   await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT,
       xp INTEGER DEFAULT 0,
       level INTEGER DEFAULT 1,
-      vc_seconds INTEGER DEFAULT 0
+      lastSeen INTEGER
     );
 
-    CREATE TABLE IF NOT EXISTS afk (
-      user_id TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS guilds (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      prefix TEXT DEFAULT '$',
+      joinedAt INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS vc_activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT,
+      guildId TEXT,
+      joinedAt INTEGER,
+      leftAt INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS warnings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT,
+      guildId TEXT,
       reason TEXT,
-      expires_at INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS lfsquad (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT,
-      game TEXT,
-      message TEXT,
-      created_at INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS vc_joinlog (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT,
-      guild_id TEXT,
-      event TEXT, -- 'join' | 'leave'
-      ts INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS infractions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT,
-      type TEXT,
-      reason TEXT,
-      created_at INTEGER
+      timestamp INTEGER
     );
   `);
 
-  console.log(chalk.green('[SQLITE] Tables ensured: users, afk, lfsquad, vc_joinlog, infractions'));
+  console.log('✅ [DexDB] SQLite database ready →', dbPath);
   return db;
 }
 
-// helpers
-export async function getRow(sql, params = []) {
-  return db.get(sql, params);
+// 🔁 Safe query function
+export async function runQuery(query, params = []) {
+  const db = await getDatabase();
+  try {
+    return await db.run(query, params);
+  } catch (error) {
+    console.error('❌ [DexDB] Query error:', error.message);
+  } finally {
+    await db.close();
+  }
 }
-export async function all(sql, params = []) {
-  return db.all(sql, params);
+
+// 📊 Fetch data helper
+export async function fetchOne(query, params = []) {
+  const db = await getDatabase();
+  try {
+    return await db.get(query, params);
+  } catch (error) {
+    console.error('❌ [DexDB] Fetch error:', error.message);
+  } finally {
+    await db.close();
+  }
 }
-export async function run(sql, params = []) {
-  return db.run(sql, params);
+
+// 📋 Fetch multiple rows
+export async function fetchAll(query, params = []) {
+  const db = await getDatabase();
+  try {
+    return await db.all(query, params);
+  } catch (error) {
+    console.error('❌ [DexDB] FetchAll error:', error.message);
+  } finally {
+    await db.close();
+  }
 }
