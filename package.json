@@ -1,21 +1,23 @@
 {
   "name": "dexbot",
-  "version": "0.2.1",
-  "description": "DexBot - Discord AI prototype with SQLite3 persistence and voice management",
+  "version": "0.4.0",
+  "description": "DexBot — Discord bot prototype with SQLite3 and Express web binding",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"No test specified\" && exit 0"
+    "dev": "nodemon index.js"
   },
   "dependencies": {
-    "discord.js": "^14.15.3",
-    "sqlite3": "^5.1.7",
-    "dotenv": "^16.4.5"
+    "discord.js": "^15.1.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^4.1.2"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=22.16.0"
   },
-  "author": "Saber",
+  "author": "Dex",
   "license": "MIT"
 }
