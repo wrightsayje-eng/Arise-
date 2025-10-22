@@ -1,16 +1,20 @@
 {
   "name": "vybz-bot",
   "version": "1.0.0",
-  "description": "Discord bot VyBz powered by Dex, now using SQLite",
-  "type": "module",
+  "description": "Discord bot with leveling, squad, and anti-perm abuse features using SQLite.",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
+  "author": "Dex",
+  "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^8.4.0",
     "discord.js": "^14.16.3",
+    "sqlite3": "^5.1.6",
+    "better-sqlite3": "^8.4.1",
     "dotenv": "^16.3.1",
+    "chalk": "^5.3.0",
     "express": "^4.18.2"
   }
 }
