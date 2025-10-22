@@ -1,33 +1,23 @@
-// ─────────────────────────────────────────────
-// 💬 Chat Interaction Module
-// Greets new users, handles verification, witty responses
-// ─────────────────────────────────────────────
+/**
+ * ===============================
+ * Chat Interaction & Commands
+ * ===============================
+ */
 
-export default function setupChatInteraction(client) {
-  client.on("messageCreate", async message => {
+export function chatInteraction(client, db) {
+  client.on('messageCreate', async (message) => {
     try {
       if (message.author.bot) return;
 
-      // Unique greeting example
-      if (message.content.toLowerCase().includes("hi") || message.content.toLowerCase().includes("hello")) {
-        const greetings = [
-          `Yo ${message.author.username}, VyBz just flexed in!`,
-          `What's good ${message.author.username}? VyBz here!`,
-          `Ayy ${message.author.username}, welcome to the vibes!`
-        ];
-        const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
-        message.channel.send(randomGreeting);
+      // Simple AFK check example
+      if (message.content.startsWith('!afk')) {
+        const reason = message.content.split(' ').slice(1).join(' ') || 'AFK';
+        const expires = Date.now() + 3 * 60 * 60 * 1000; // 3 hours
+        await db.run('INSERT OR REPLACE INTO afk (user_id, reason, expires_at) VALUES (?, ?, ?)', message.author.id, reason, expires);
+        message.reply(`You are now AFK for 3 hours: ${reason}`);
       }
-
-      // Verification example
-      if (message.content.toLowerCase().includes("verify")) {
-        message.channel.send(
-          `${message.author}, slide into the **#autoverify** channel. If you're known, I can ping admins for express verification 😉`
-        );
-      }
-
-    } catch (error) {
-      console.error("[CHAT-INTERACT] ❌ Error handling message:", error);
+    } catch (err) {
+      console.error('[CHAT INTERACTION ERROR]', err);
     }
   });
 }
