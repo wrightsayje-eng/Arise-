@@ -1,24 +1,18 @@
-// ─────────────────────────────────────────────
-// 🎧 VC Management Module
-// AFK detection, CAM-only checks, and music bot tagging
-// ─────────────────────────────────────────────
+/**
+ * ===============================
+ * Voice Channel Management
+ * ===============================
+ */
 
-export default function setupVCManagement(client) {
-  client.on("voiceStateUpdate", (oldState, newState) => {
+export function setupVCManagement(client, db) {
+  client.on('voiceStateUpdate', async (oldState, newState) => {
     try {
-      if (!newState || !newState.channel) return;
-
-      const member = newState.member;
-      const channel = newState.channel;
-
-      // Example: AFK after 30 min with no camera/audio
-      // Call your AFK/move logic here
-
-      // Example: CAM-ONLY enforcement
-      // Call your logic to check for camera and move users
-
-    } catch (error) {
-      console.error("[VC-MANAGER] ❌ Error handling VC state:", error);
+      // Track when users join/leave VC
+      if (oldState.channelId !== newState.channelId) {
+        console.log(`[VC] ${newState.member.user.tag} moved to ${newState.channel?.name || 'none'}`);
+      }
+    } catch (err) {
+      console.error('[VC MANAGEMENT ERROR]', err);
     }
   });
 }
