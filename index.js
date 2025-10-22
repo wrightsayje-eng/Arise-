@@ -1,135 +1,138 @@
-/**
- * ⚙️ DexBot Main Index (Prototype Build v1.3)
- * -------------------------------------------
- * 🧠 Core Features:
- *  - Discord.js v14+ with full ES module support.
- *  - SQLite3 local persistence (no external DB needed).
- *  - Modular structure (auto-loads command & system modules).
- *  - Voice Guard system to prevent VC join/leave spam.
- *  - Graceful error recovery and live monitoring.
- * 
- * 💬 Responds to:
- *   - Prefix Commands: `$`
- *   - Direct Mentions / “Dex” keyword (AI-style plain text)
- * 
- * 🧱 Stability Enhancements:
- *   - Auto-restart protection for module errors.
- *   - Clear, modern logging with emojis.
- */
+// ⚡ DexBot Main Engine v0.2
+// 🚀 Written by Dex & Saber
+// 💡 Uses SQLite3 (async) for persistence
+// 🎧 Includes VC anti-join/leave spam protection
+// 🤖 Responds to prefix "$" and plain text "Dex"
 
-import { Client, GatewayIntentBits, Partials, Collection } from "discord.js";
-import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
-import { initVCManagement, handleVoiceStateUpdate } from "./modules/vcManagement.js";
+import { Client, GatewayIntentBits, Partials, PermissionsBitField } from 'discord.js';
+import { getDatabase, runQuery } from './data/sqliteDatabase.js';
+import fs from 'fs';
+import path from 'path';
 
-// 🧩 Module Imports
-import setupServerManagement from "./modules/serverManagement.js";
-import setupChatInteraction from "./modules/chatInteraction.js";
-import setupLevelingSystem from "./modules/leveling.js";
-import setupLFSquad from "./modules/lfSquad.js";
+// ✅ Load environment variables via Render dashboard
+const TOKEN = process.env.DISCORD_TOKEN;
 
-// 🗝️ Environment Config
-dotenv.config();
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const PREFIX = "$";
-
-// 🧠 Identify File Context
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// 💾 SQLite Initialization
-let db;
-async function initDatabase() {
-  db = await open({
-    filename: "./data/main.sqlite",
-    driver: sqlite3.Database,
-  });
-
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS user_data (
-      user_id TEXT PRIMARY KEY,
-      xp INTEGER DEFAULT 0,
-      level INTEGER DEFAULT 1
-    );
-  `);
-
-  console.log("💾 [DATABASE] SQLite3 initialized successfully ✅");
-}
-
-// 🤖 Create Discord Client
+// 🧠 Initialize client with all essential intents
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
-client.commands = new Collection();
+// 💾 Anti join-leave tracker (in-memory)
+const vcJoinTracker = new Map();
 
-// ⚙️ Load Modules (Dynamic Import System)
-async function loadModules() {
-  console.log("🧩 Loading modules...");
-  await setupServerManagement(client, db);
-  await setupChatInteraction(client, db);
-  await setupLevelingSystem(client, db);
-  await setupLFSquad(client, db);
-  console.log("✅ All modules loaded successfully.");
-}
+// 🟢 Bot ready
+client.once('ready', async () => {
+  console.log(`✅ DexBot online as ${client.user.tag}`);
+  const db = await getDatabase();
+  await db.close();
+});
 
-// 🧩 Voice Management System
-client.on("voiceStateUpdate", handleVoiceStateUpdate);
+// 🧩 Command prefix
+const PREFIX = '$';
 
-// 💬 Message Handler
-client.on("messageCreate", async (message) => {
+// 🧠 Message listener
+client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
   const content = message.content.trim();
 
-  // --- 🧠 Dex AI-Style Direct Trigger ---
+  // 👂 Respond to "Dex" directly
   if (/^dex$/i.test(content)) {
-    return message.reply("👋 Yo! Dex here — what’s up?");
+    return message.reply('👋 Hey there! Dex online and operational ⚙️');
   }
 
-  // --- 💬 Prefix Command Handling ---
+  // 💬 Command system
   if (!content.startsWith(PREFIX)) return;
-  const args = content.slice(PREFIX.length).trim().split(/ +/);
-  const commandName = args.shift().toLowerCase();
+  const [cmd, ...args] = content.slice(PREFIX.length).split(/\s+/);
 
-  try {
-    const commandPath = `./commands/${commandName}.js`;
-    if (fs.existsSync(path.join(__dirname, "commands", `${commandName}.js`))) {
-      const { default: command } = await import(commandPath);
-      await command.execute(client, message, args, db);
-    }
-  } catch (err) {
-    console.error(`❌ [COMMAND ERROR] ${commandName}:`, err);
-    message.reply("⚠️ Something glitched out — Dex is fixing it!");
+  switch (cmd.toLowerCase()) {
+    case 'ping':
+      await message.reply('🏓 Pong!');
+      break;
+
+    case 'xp':
+      const db = await getDatabase();
+      const user = await db.get('SELECT * FROM users WHERE id = ?', [message.author.id]);
+      if (user) {
+        message.reply(`📊 ${message.author.username}, you’re level ${user.level} with ${user.xp} XP.`);
+      } else {
+        message.reply(`🆕 No data found — you’ll start tracking now.`);
+        await db.run('INSERT INTO users (id, username, xp, level, lastSeen) VALUES (?, ?, ?, ?, ?)', [
+          message.author.id,
+          message.author.username,
+          0,
+          1,
+          Date.now(),
+        ]);
+      }
+      await db.close();
+      break;
+
+    default:
+      message.reply('❓ Unknown command. Try `$ping` or `$xp`');
+      break;
   }
 });
 
-// 🚀 Bot Startup Sequence
-(async () => {
-  console.log("🧠 [SYSTEM] Initializing DexBot Prototype...");
-
+// 🎧 VC Join/Leave Anti-Spam System
+client.on('voiceStateUpdate', async (oldState, newState) => {
   try {
-    await initDatabase();
-    await initVCManagement();
-    await loadModules();
+    const member = newState.member || oldState.member;
+    if (!member || member.user.bot) return;
 
-    client.once("ready", () => {
-      console.log(`💫 ${client.user.username} is online and vibin’ as ${client.user.tag}`);
-    });
+    const guildId = member.guild.id;
+    const userId = member.id;
+    const now = Date.now();
 
-    await client.login(DISCORD_TOKEN);
-  } catch (err) {
-    console.error("❌ [FATAL ERROR] Startup failed:", err);
+    // 🟢 Joined VC
+    if (!oldState.channelId && newState.channelId) {
+      const record = vcJoinTracker.get(userId) || [];
+      const updated = record.filter((t) => now - t < 180000); // keep only last 3 min
+      updated.push(now);
+      vcJoinTracker.set(userId, updated);
+    }
+
+    // 🔴 Left VC
+    if (oldState.channelId && !newState.channelId) {
+      const record = vcJoinTracker.get(userId) || [];
+      const recent = record.filter((t) => now - t < 180000); // last 3 min
+      recent.push(now);
+      vcJoinTracker.set(userId, recent);
+
+      if (recent.length >= 3) {
+        // 🧱 Deny Connect permission for 1hr
+        const guild = member.guild;
+        const channel = oldState.channel;
+        if (!channel) return;
+
+        await channel.permissionOverwrites.edit(userId, {
+          Connect: false,
+        });
+
+        console.log(`🚫 ${member.user.tag} temporarily locked from VC in ${guild.name}`);
+
+        setTimeout(async () => {
+          await channel.permissionOverwrites.delete(userId).catch(() => {});
+          console.log(`🔓 ${member.user.tag} VC lock lifted`);
+        }, 60 * 60 * 1000); // 1 hour
+      }
+    }
+  } catch (error) {
+    console.error('❌ [VC Management Error]', error);
   }
-})();
+});
+
+// 🧱 Global error handling
+process.on('unhandledRejection', (error) => {
+  console.error('⚠️ Unhandled Rejection:', error);
+});
+
+// 🔌 Login
+client.login(TOKEN);
