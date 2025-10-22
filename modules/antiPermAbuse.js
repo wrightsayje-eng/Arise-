@@ -1,15 +1,21 @@
-// modules/antiPermAbuse.js
-import User from "../models/User.js";
+// ─────────────────────────────────────────────
+// 🛡️ Anti-Permission Abuse Monitor
+// Watches for suspicious permission changes in voice channels
+// ─────────────────────────────────────────────
 
-export default function monitorPermAbuse(newState, oldState) {
-  const member = newState?.member;
-  if (!member) return;
+export default function monitorPermAbuse(oldState, newState) {
+  try {
+    const member = newState?.member;
+    if (!member) return; // Skip if there's no valid member
 
-  // your anti-permission abuse logic here
-}
+    // Example check — customize as needed later
+    if (newState.channelId && oldState.channelId !== newState.channelId) {
+      console.log(`[SECURITY] ${member.user.tag} switched channels.`);
+    }
 
-  const user = await User.findOne({ userId: member.id }) || new User({ userId: member.id });
-  // Placeholder logic for muting/deafening abuse
-  // You can expand this to check timestamps for repeated mutes/deafens in 2 minutes
-  await user.save();
+    // Add more permission abuse detection logic here later...
+
+  } catch (error) {
+    console.error("[ANTI-PERM-ABUSE] ❌ Error detected:", error);
+  }
 }
