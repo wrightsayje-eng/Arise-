@@ -1,4 +1,4 @@
-// 💾 sqliteDatabase.js v0.2
+// 💾 sqliteDatabase.js v0.3
 // DexBot persistent data layer — pure sqlite3 implementation.
 
 import sqlite3 from 'sqlite3';
@@ -54,4 +54,12 @@ export async function initDatabase() {
 export function getDB() {
   if (!db) throw new Error('❌ Database not initialized — call initDatabase() first.');
   return db;
+}
+
+// Aliases for convenience
+export const getDatabase = getDB;
+
+export async function runQuery(sql, params = []) {
+  const db = getDB();
+  return db.all(sql, params);
 }
