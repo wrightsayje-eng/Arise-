@@ -1,63 +1,93 @@
-/* ===================================================
-   【ＤｅＸ　ＶｙＢｚ】 Bot Index
-   Modern ES Modules | SQLite Integration | Clean Setup
-   =================================================== */
+/**
+ * =============================================
+ *  【ＤｅＸ　ＶｙＢｚ】 — index.js
+ *  Locked: DISCORD_TOKEN | Prefix: '$' | Dex responds to "Dex"
+ *  SQLite3 (sqlite + sqlite3), ES modules, Discord.js v14
+ *  Author: Dex for Saber — production prototype
+ * =============================================
+ */
 
-import { Client, GatewayIntentBits, Partials } from "discord.js";
-import dotenv from "dotenv";
+import 'dotenv/config';
+import express from 'express';
+import chalk from 'chalk';
+import { Client, GatewayIntentBits, Partials, Events } from 'discord.js';
 
-// --- Modules ---
-import monitorPermAbuse from "./modules/antiPermAbuse.js";
-import setupServerManagement from "./modules/serverManagement.js";
-import handleChatInteraction from "./modules/chatInteraction.js";
-import handleLeveling from "./modules/leveling.js";
-import lfSquad from "./modules/lfSquad.js";
-import { connectDB } from "./modules/sqliteDatabase.js";
+// Modules (all modules must export a single named function taking (client, db))
+import { initDB, getRow, run, all } from './modules/sqliteDatabase.js';
+import setupServerManagement from './modules/serverManagement.js';
+import setupVCManagement from './modules/vcManagement.js';
+import monitorPermAbuse from './modules/antiPermAbuse.js';
+import setupChatInteraction from './modules/chatInteraction.js';
+import setupLeveling from './modules/leveling.js';
+import setupLFSquad from './modules/lfSquad.js';
 
-// --- Environment ---
-dotenv.config();
-const TOKEN = process.env.BOT_TOKEN;
+// -----------------------------
+// Config / Constants
+// -----------------------------
+const TOKEN = process.env.DISCORD_TOKEN;
+if (!TOKEN) {
+  console.error(chalk.red('[CONFIG] DISCORD_TOKEN not set in environment variables — aborting.'));
+  process.exit(1);
+}
+const PREFIX = '$';
+const BOT_NAME = 'Dex'; // plain-text trigger
+const PORT = process.env.PORT || 3000;
 
-// --- Discord Client Setup ---
+// -----------------------------
+// Express keep-alive
+// -----------------------------
+const app = express();
+app.get('/', (req, res) => res.send('💫 VyBz (Dex) is online.'));
+app.listen(PORT, () => console.log(chalk.cyan(`[EXPRESS] Keep-alive server running on port ${PORT}`)));
+
+// -----------------------------
+// Discord client
+// -----------------------------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember],
 });
 
-// --- Database Connection ---
-try {
-  await connectDB();
-  console.log("[SQLITE] Database connected successfully ✅");
-} catch (err) {
-  console.error("[SQLITE] Database connection failed ❌", err);
-}
+// -----------------------------
+// Boot sequence (async init)
+// -----------------------------
+(async () => {
+  try {
+    // Initialize DB
+    const db = await initDB();
+    console.log(chalk.green('[SQLITE] Database initialized and ready ✅'));
 
-// --- Ready Event ---
-client.on("clientReady", () => {
-  console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
-});
+    // Attach DB helpers to client for modules that prefer client.db
+    client.db = db;
+    client.prefix = PREFIX;
 
-// --- Load Modules ---
-monitorPermAbuse(client);
-setupServerManagement(client);
-handleChatInteraction(client);
-handleLeveling(client);
-lfSquad(client);
+    // Initialize modules (they should register event handlers safely)
+    // Order: core management, moderation, features
+    setupServerManagement(client, db);    // server profile scanner, auto-warn/timeout
+    setupVCManagement(client, db);        // VC AFK, cam-only enforcement, join/leave spam lockout
+    monitorPermAbuse(client, db);         // anti perm abuse monitor & mitigation
+    setupChatInteraction(client, db);     // greetings, verification, "Dex" responses, prefix commands
+    setupLeveling(client, db);            // xp and leveling (text + voice points)
+    setupLFSquad(client, db);             // LF$ feature
 
-// --- Login ---
-client.login(TOKEN)
-  .then(() => console.log("[LOGIN] Bot connected to Discord successfully ✅"))
-  .catch((err) => console.error("[LOGIN] Discord connection failed ❌", err));
+    // Client Ready
+    client.on(Events.ClientReady, (c) => {
+      console.log(chalk.magentaBright(`\n💫 ${c.user.tag} is online — VyBz flexin' as ${c.user.username}`));
+      console.log(chalk.yellow('[SYSTEM] Modules loaded successfully.'));
+    });
 
-// --- Keep-alive for Render ---
-import express from "express";
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => res.send("VyBz Bot is running!"));
-app.listen(PORT, () => console.log(`[EXPRESS] Keep-alive server running on port ${PORT}`));
+    // Login
+    await client.login(TOKEN);
+    console.log(chalk.cyan('[LOGIN] Discord login attempted — check above for success ✅'));
+  } catch (err) {
+    console.error(chalk.red('[BOOT] Fatal error during startup — aborting ❌'), err);
+    process.exit(1);
+  }
+})();
