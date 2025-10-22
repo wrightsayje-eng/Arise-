@@ -1,63 +1,51 @@
-/**
- * ────────────────【💾 SQLite Database Module v0.2】────────────────
- * DexBot central database handler using sqlite3
- * Supports async operations and ensures DB folder/file existence
- * Handles errors gracefully without crashing the bot
- */
+// ⛩️ DexBot SQLite Database v0.1
+// ✅ Uses modern async SQLite with sqlite3 backend
+// ✅ Automatically creates database file if missing
+// ✅ Logs connection status in a clean format
 
-import sqlite3 from "sqlite3";
-import { open } from "sqlite";
-import fs from "fs";
-import path from "path";
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Ensure the database folder exists
-const dataDir = path.resolve("./root/data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+// Resolve current directory for ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// SQLite database file path
-const DB_PATH = path.join(dataDir, "dexbot.sqlite");
+// Database path inside /root/data
+const dbPath = path.resolve(__dirname, 'dexbot.sqlite');
 
-// Open SQLite database with promise-based API
-export const db = await open({
-  filename: DB_PATH,
-  driver: sqlite3.Database
-});
+// Initialize database
+let db;
 
-// Initialize tables if they do not exist
-await db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  join_leave_count INTEGER DEFAULT 0,
-  last_join_leave INTEGER DEFAULT 0,
-  vc_lock_expiration INTEGER DEFAULT 0
-);
+export async function initDatabase() {
+	try {
+		db = await open({
+			filename: dbPath,
+			driver: sqlite3.Database,
+		});
 
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT
-);
+		console.log('🧠 DexBot SQLite Connected:', dbPath);
 
-CREATE TABLE IF NOT EXISTS logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT,
-  message TEXT,
-  timestamp INTEGER
-);
-`);
+		// Example default table
+		await db.exec(`
+			CREATE TABLE IF NOT EXISTS user_activity (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_id TEXT NOT NULL,
+				event_type TEXT NOT NULL,
+				timestamp INTEGER NOT NULL
+			);
+		`);
 
-console.log("💾 [DB] SQLite database ready at", DB_PATH);
+		console.log('📦 Tables verified and ready');
+		return db;
+	} catch (err) {
+		console.error('❌ Database initialization failed:', err);
+		process.exit(1);
+	}
+}
 
-/**
- * Helper function to log messages to DB
- */
-export async function logToDB(type, message) {
-  const timestamp = Date.now();
-  try {
-    await db.run(
-      `INSERT INTO logs (type, message, timestamp) VALUES (?, ?, ?)`,
-      [type, message, timestamp]
-    );
-  } catch (err) {
-    console.error("❌ [DB] Log insertion failed:", err);
-  }
+export function getDB() {
+	if (!db) throw new Error('Database not initialized! Call initDatabase() first.');
+	return db;
 }
