@@ -1,7 +1,7 @@
 {
-  "name": "arise-Session18",
+  "name": "dex-vybz",
   "version": "1.0.0",
-  "description": "Arise-Session18 — a Discord bot with attitude and chill automation",
+  "description": "DeX VyBz — a Discord bot with attitude and chill automation",
   "main": "index.js",
   "type": "module",
   "scripts": {
