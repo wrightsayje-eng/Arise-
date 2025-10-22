@@ -1,97 +1,63 @@
-// ✨ Dex Database Handler v0.2
-// 📁 File: /root/data/sqliteDatabase.js
-// 🧱 Engine: sqlite3 (Async Mode)
-// 🧠 Purpose: Handles persistent storage for Dex’s data (users, guilds, etc.)
+/**
+ * ────────────────【💾 SQLite Database Module v0.2】────────────────
+ * DexBot central database handler using sqlite3
+ * Supports async operations and ensures DB folder/file existence
+ * Handles errors gracefully without crashing the bot
+ */
 
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
-import path from 'path';
-import fs from 'fs';
+import sqlite3 from "sqlite3";
+import { open } from "sqlite";
+import fs from "fs";
+import path from "path";
 
-// 🗂️ Ensure the /data directory exists
-const dataDir = path.resolve('./data');
+// Ensure the database folder exists
+const dataDir = path.resolve("./root/data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-// 📌 Define DB path
-const dbPath = path.join(dataDir, 'dexbot.sqlite');
+// SQLite database file path
+const DB_PATH = path.join(dataDir, "dexbot.sqlite");
 
-// ⚡ Open SQLite connection (async)
-export async function getDatabase() {
-  const db = await open({
-    filename: dbPath,
-    driver: sqlite3.Database,
-  });
+// Open SQLite database with promise-based API
+export const db = await open({
+  filename: DB_PATH,
+  driver: sqlite3.Database
+});
 
-  // 🧱 Initialize tables
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT,
-      xp INTEGER DEFAULT 0,
-      level INTEGER DEFAULT 1,
-      lastSeen INTEGER
-    );
+// Initialize tables if they do not exist
+await db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  join_leave_count INTEGER DEFAULT 0,
+  last_join_leave INTEGER DEFAULT 0,
+  vc_lock_expiration INTEGER DEFAULT 0
+);
 
-    CREATE TABLE IF NOT EXISTS guilds (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      prefix TEXT DEFAULT '$',
-      joinedAt INTEGER
-    );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 
-    CREATE TABLE IF NOT EXISTS vc_activity (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId TEXT,
-      guildId TEXT,
-      joinedAt INTEGER,
-      leftAt INTEGER
-    );
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT,
+  message TEXT,
+  timestamp INTEGER
+);
+`);
 
-    CREATE TABLE IF NOT EXISTS warnings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId TEXT,
-      guildId TEXT,
-      reason TEXT,
-      timestamp INTEGER
-    );
-  `);
+console.log("💾 [DB] SQLite database ready at", DB_PATH);
 
-  console.log('✅ [DexDB] SQLite database ready →', dbPath);
-  return db;
-}
-
-// 🔁 Safe query function
-export async function runQuery(query, params = []) {
-  const db = await getDatabase();
+/**
+ * Helper function to log messages to DB
+ */
+export async function logToDB(type, message) {
+  const timestamp = Date.now();
   try {
-    return await db.run(query, params);
-  } catch (error) {
-    console.error('❌ [DexDB] Query error:', error.message);
-  } finally {
-    await db.close();
-  }
-}
-
-// 📊 Fetch data helper
-export async function fetchOne(query, params = []) {
-  const db = await getDatabase();
-  try {
-    return await db.get(query, params);
-  } catch (error) {
-    console.error('❌ [DexDB] Fetch error:', error.message);
-  } finally {
-    await db.close();
-  }
-}
-
-// 📋 Fetch multiple rows
-export async function fetchAll(query, params = []) {
-  const db = await getDatabase();
-  try {
-    return await db.all(query, params);
-  } catch (error) {
-    console.error('❌ [DexDB] FetchAll error:', error.message);
-  } finally {
-    await db.close();
+    await db.run(
+      `INSERT INTO logs (type, message, timestamp) VALUES (?, ?, ?)`,
+      [type, message, timestamp]
+    );
+  } catch (err) {
+    console.error("❌ [DB] Log insertion failed:", err);
   }
 }
