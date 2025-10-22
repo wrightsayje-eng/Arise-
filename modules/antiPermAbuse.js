@@ -1,23 +1,24 @@
-// ─────────────────────────────────────────────
-// 🛡️ Anti-Permission Abuse Module
-// Monitors staff actions in VCs to prevent abuse
-// ─────────────────────────────────────────────
+/**
+ * ===============================
+ * Anti-Permission Abuse Monitor
+ * ===============================
+ */
 
-export default function monitorPermAbuse(client) {
-  client.on("voiceStateUpdate", (oldState, newState) => {
+export function monitorPermAbuse(client, db) {
+  client.on('guildMemberUpdate', async (oldMember, newMember) => {
     try {
-      if (!newState || !newState.member) return;
+      if (!newMember) return;
 
-      const member = newState.member;
+      // Example: prevent role escalation
+      const oldRoles = oldMember.roles.cache.map(r => r.id);
+      const newRoles = newMember.roles.cache.map(r => r.id);
 
-      // Example check: muting/unmuting abuse prevention
-      // Replace with actual abuse logic
-      console.log(`[ANTI-PERM] Monitoring perms for ${member.user.tag}`);
-      
-      // Future logic: undo excessive mutes/deafens
-
-    } catch (error) {
-      console.error("[ANTI-PERM] ❌ Error monitoring VC permissions:", error);
+      if (newRoles.length > oldRoles.length) {
+        console.log(`[ANTI-ABUSE] ${newMember.user.tag} gained a role.`);
+        // Optional: log to DB
+      }
+    } catch (err) {
+      console.error('[ANTI-PERM ABUSE ERROR]', err);
     }
   });
 }
