@@ -1,9 +1,12 @@
 // modules/antiPermAbuse.js
 import User from "../models/User.js";
 
-export async function monitorPermAbuse(oldState, newState) {
-  const member = newState.member;
-  if (!member || member.user.bot) return;
+export default function monitorPermAbuse(newState, oldState) {
+  const member = newState?.member;
+  if (!member) return;
+
+  // your anti-permission abuse logic here
+}
 
   const user = await User.findOne({ userId: member.id }) || new User({ userId: member.id });
   // Placeholder logic for muting/deafening abuse
