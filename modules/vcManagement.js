@@ -1,83 +1,81 @@
-// 🛠 vcManagement.js v0.3
-// DexBot voice channel monitoring — locks out users rapidly joining/leaving.
+// 🎧 vcManagement.js v0.1
+// DexBot — Voice Channel monitoring & rapid join/leave protection
 
-import { getDatabase } from "../data/sqliteDatabase.js";
-import { PermissionsBitField } from "discord.js";
+import { getDatabase } from '../data/sqliteDatabase.js';
 
-const rapidJoinLeaveMap = new Map(); // userId -> timestamps array
-const RAPID_LIMIT = 3; // 2-3 rapid joins/leaves
-const TIME_WINDOW = 1.5 * 60 * 1000; // 1.5 min in ms
-const LOCK_DURATION = 60 * 60 * 1000; // 1 hour
+const JOIN_LEAVE_LIMIT = 3; // 2-3 rapid join/leaves
+const TIME_WINDOW = 3 * 60 * 1000; // 3 minutes
+const LOCK_DURATION = 60 * 60 * 1000; // 1 hour in ms
 
-export function setupVCManagement(client) {
-    client.on("voiceStateUpdate", async (oldState, newState) => {
-        try {
-            const db = await getDatabase();
-            const userId = newState.id;
-            const channelId = newState.channelId || oldState.channelId;
-            const now = Date.now();
+// Track rapid join/leaves per user
+const joinLeaveMap = new Map();
 
-            // Log join/leave in DB
-            await db.run(
-                `INSERT INTO vc_activity (userId, channelId, joinedAt, leftAt)
-                 VALUES (?, ?, ?, ?)`,
-                [
-                    userId,
-                    channelId,
-                    newState.channelId ? now : null,
-                    oldState.channelId && !newState.channelId ? now : null,
-                ]
-            );
+export default function vcManagement(client) {
+  const dbPromise = getDatabase(); // ensure DB is initialized
 
-            // Track rapid join/leave
-            if (!rapidJoinLeaveMap.has(userId)) rapidJoinLeaveMap.set(userId, []);
-            const timestamps = rapidJoinLeaveMap.get(userId);
+  client.on('voiceStateUpdate', async (oldState, newState) => {
+    const userId = newState.id;
+    const channelIdOld = oldState.channelId;
+    const channelIdNew = newState.channelId;
+    const timestamp = Date.now();
 
-            // Add timestamp if user left quickly
-            if (!newState.channelId && oldState.channelId) {
-                timestamps.push(now);
+    // Ignore bots
+    if (newState.member.user.bot) return;
 
-                // Remove old timestamps beyond time window
-                while (timestamps.length && now - timestamps[0] > TIME_WINDOW) timestamps.shift();
+    const db = await dbPromise;
 
-                // Check if limit exceeded
-                if (timestamps.length >= RAPID_LIMIT) {
-                    const guild = oldState.guild;
-                    const member = guild.members.cache.get(userId);
-                    if (member) {
-                        // Deny connect permission in all voice channels for 1hr
-                        guild.channels.cache.forEach(async (channel) => {
-                            if (channel.isVoiceBased()) {
-                                await channel.permissionOverwrites.edit(member, {
-                                    Connect: false,
-                                });
-                            }
-                        });
+    // Record join/leave
+    if (!channelIdOld && channelIdNew) {
+      // Joined
+      await db.run(
+        `INSERT INTO vc_activity(userId, channelId, joinedAt, leftAt)
+         VALUES (?, ?, ?, NULL)`,
+        [userId, channelIdNew, timestamp]
+      );
+    } else if (channelIdOld && !channelIdNew) {
+      // Left
+      await db.run(
+        `UPDATE vc_activity SET leftAt = ? 
+         WHERE userId = ? AND leftAt IS NULL
+         ORDER BY joinedAt DESC LIMIT 1`,
+        [timestamp, userId]
+      );
+    }
 
-                        console.log(`🔒 ${member.user.tag} locked out of VC for 1 hour (rapid join/leave)`);
+    // Rapid join/leave logic
+    const events = joinLeaveMap.get(userId) || [];
+    // Push current timestamp
+    events.push(timestamp);
+    // Remove events older than TIME_WINDOW
+    const recent = events.filter((t) => timestamp - t <= TIME_WINDOW);
+    joinLeaveMap.set(userId, recent);
 
-                        // Clear timestamps
-                        rapidJoinLeaveMap.delete(userId);
+    if (recent.length >= JOIN_LEAVE_LIMIT) {
+      // Lock the user out
+      try {
+        const guild = newState.guild;
+        const member = await guild.members.fetch(userId);
+        const channel = guild.channels.cache.get(channelIdNew || channelIdOld);
 
-                        // Schedule unlock
-                        setTimeout(async () => {
-                            const memberToUnlock = guild.members.cache.get(userId);
-                            if (memberToUnlock) {
-                                guild.channels.cache.forEach(async (channel) => {
-                                    if (channel.isVoiceBased()) {
-                                        await channel.permissionOverwrites.edit(memberToUnlock, {
-                                            Connect: null,
-                                        });
-                                    }
-                                });
-                                console.log(`🔓 ${memberToUnlock.user.tag} VC lock expired`);
-                            }
-                        }, LOCK_DURATION);
-                    }
-                }
-            }
-        } catch (err) {
-            console.error("❌ VC Management error:", err);
+        if (channel) {
+          await channel.permissionOverwrites.edit(member, {
+            Connect: false,
+          });
+
+          // Schedule unlock
+          setTimeout(() => {
+            channel.permissionOverwrites.edit(member, {
+              Connect: null,
+            });
+          }, LOCK_DURATION);
+
+          // Clear tracked events
+          joinLeaveMap.set(userId, []);
+          console.log(`⛔ Locked ${member.user.tag} from ${channel.name} for 1 hour due to rapid join/leaves.`);
         }
-    });
+      } catch (err) {
+        console.error('❌ Failed to lock user:', err);
+      }
+    }
+  });
 }
