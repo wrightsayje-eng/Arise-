@@ -1,77 +1,101 @@
-/* =========================================
-   【ＤｅＸ　ＶｙＢｚ】 Discord Bot Main Index
-   Author: Saber & Dex
-   Purpose: Full bot setup with modules, MongoDB, 
-            Express keep-alive, and ES module style
-   ========================================= */
+/* =========================
+   VyBz Discord Bot - Index
+   Clean ES Modules & Labeled
+========================= */
 
-import 'dotenv/config';
-import express from 'express';
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import mongoose from 'mongoose';
+import "dotenv/config"; // Load env variables
+import express from "express";
+import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { MongoClient } from "mongodb";
 
-// -------------------- MODULE IMPORTS -------------------- //
-// Management Modules
-import setupServerManagement from './modules/serverManagement.js';
-import monitorVCs from './modules/vcManagement.js';
-import monitorPermAbuse from './modules/antiPermAbuse.js';
+/* =========================
+   Module Imports
+========================= */
+import setupServerManagement from "./modules/serverManagement.js";
+import setupVCManagement from "./modules/vcManagement.js";
+import monitorPermAbuse from "./modules/antiPermAbuse.js";
+import setupChatInteraction from "./modules/chatInteraction.js";
+import setupLeveling from "./modules/leveling.js";
+import setupLFSquad from "./modules/lfSquad.js";
 
-// Interaction Modules
-import chatInteraction from './modules/chatInteraction.js';
-import levelingSystem from './modules/leveling.js';
-import lfSquad from './modules/lfSquad.js';
-
-// -------------------- EXPRESS KEEP-ALIVE -------------------- //
+/* =========================
+   Express Keep-Alive
+========================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('VyBz is online!'));
+app.get("/", (req, res) => res.send("VyBz is online!"));
 app.listen(PORT, () => console.log(`[EXPRESS] Keep-alive server running on port ${PORT}`));
 
-// -------------------- DISCORD CLIENT -------------------- //
+/* =========================
+   Discord Client Setup
+========================= */
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildPresences
+  ],
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember]
 });
 
-// -------------------- MONGO CONNECTION -------------------- //
-const connectMongo = async () => {
+/* =========================
+   MongoDB Connection
+========================= */
+const mongoSRV = process.env.MONGO_URI_SRV;      // SRV URI
+const mongoDirect = process.env.MONGO_URI_DIRECT; // Direct URI
+let dbClient;
+
+async function connectMongo() {
+  try {
+    dbClient = new MongoClient(mongoSRV);
+    await dbClient.connect();
+    console.log("[MONGO] Connected successfully using SRV URI ✅");
+    return dbClient.db();
+  } catch (errSRV) {
+    console.warn("[MONGO] SRV connection failed ❌", errSRV.message);
     try {
-        if (!process.env.MONGO_URI) throw new Error('MONGO_URI not set in environment variables');
-        await mongoose.connect(process.env.MONGO_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true
-        });
-        console.log('[MONGO] Database connected successfully ✅');
-    } catch (err) {
-        console.error('[MONGO] Database connection failed ❌', err);
-        console.log('[MONGO] ⚠️ Make sure your IP is whitelisted in MongoDB Atlas (0.0.0.0/0 for testing)');
+      dbClient = new MongoClient(mongoDirect);
+      await dbClient.connect();
+      console.log("[MONGO] Connected successfully using direct URI ✅");
+      return dbClient.db();
+    } catch (errDirect) {
+      console.error("[MONGO] Direct connection failed ❌", errDirect.message);
+      console.warn("[MONGO] ⚠️ Make sure your IP is whitelisted in MongoDB Atlas (0.0.0.0/0 for testing)");
+      process.exit(1);
     }
-};
-connectMongo();
+  }
+}
 
-// -------------------- CLIENT READY -------------------- //
-client.once('clientReady', async () => {
-    console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
-    
-    // Initialize modules
-    setupServerManagement(client);
-    monitorVCs(client);
-    monitorPermAbuse(client);
-    chatInteraction(client);
-    levelingSystem(client);
-    lfSquad(client);
-    
-    console.log('[SYSTEM] Modules loaded successfully.');
+/* =========================
+   Discord Event Handlers
+========================= */
+client.once("clientReady", async () => {
+  console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
+  
+  // Connect to Mongo
+  const db = await connectMongo();
+
+  /* =========================
+     Load Modules with DB
+  ========================== */
+  setupServerManagement(client, db);
+  setupVCManagement(client, db);
+  monitorPermAbuse(client, db);
+  setupChatInteraction(client, db);
+  setupLeveling(client, db);
+  setupLFSquad(client, db);
+
+  console.log("[SYSTEM] Modules loaded successfully.");
 });
 
-// -------------------- LOGIN -------------------- //
-if (!process.env.BOT_TOKEN) throw new Error('BOT_TOKEN not set in environment variables');
-client.login(process.env.BOT_TOKEN)
-    .then(() => console.log('[LOGIN] VyBz connected to Discord successfully ✅'))
-    .catch(err => console.error('[LOGIN] Failed to connect ❌', err));
+/* =========================
+   Discord Login
+========================= */
+client.login(process.env.BOT_TOKEN).then(() => {
+  console.log("[LOGIN] VyBz connected to Discord successfully ✅");
+}).catch(err => {
+  console.error("[LOGIN] Failed to connect to Discord ❌", err);
+});
