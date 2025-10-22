@@ -1,81 +1,83 @@
-/**
- * ────────────────【🎤 VC Management Module v0.2】────────────────
- * DexBot monitors rapid VC join/leave events
- * Denies connect permission for 1hr if user leaves/join repeatedly
- * Priority given to leaving events
- * Logs all actions to SQLite database
- */
+// 🛠 vcManagement.js v0.3
+// DexBot voice channel monitoring — locks out users rapidly joining/leaving.
 
-import { db, logToDB } from "../data/sqliteDatabase.js";
+import { getDatabase } from "../data/sqliteDatabase.js";
+import { PermissionsBitField } from "discord.js";
 
-export default function vcManagement(client) {
-  const joinLeaveThreshold = 3; // max joins/leaves within timeframe
-  const timeWindow = 3 * 60 * 1000; // 3 minutes in ms
-  const lockDuration = 60 * 60 * 1000; // 1 hour in ms
+const rapidJoinLeaveMap = new Map(); // userId -> timestamps array
+const RAPID_LIMIT = 3; // 2-3 rapid joins/leaves
+const TIME_WINDOW = 1.5 * 60 * 1000; // 1.5 min in ms
+const LOCK_DURATION = 60 * 60 * 1000; // 1 hour
 
-  client.on("voiceStateUpdate", async (oldState, newState) => {
-    try {
-      const userId = newState.id || oldState.id;
-      const now = Date.now();
+export function setupVCManagement(client) {
+    client.on("voiceStateUpdate", async (oldState, newState) => {
+        try {
+            const db = await getDatabase();
+            const userId = newState.id;
+            const channelId = newState.channelId || oldState.channelId;
+            const now = Date.now();
 
-      // Detect join or leave
-      const joined = !oldState.channel && newState.channel;
-      const left = oldState.channel && !newState.channel;
+            // Log join/leave in DB
+            await db.run(
+                `INSERT INTO vc_activity (userId, channelId, joinedAt, leftAt)
+                 VALUES (?, ?, ?, ?)`,
+                [
+                    userId,
+                    channelId,
+                    newState.channelId ? now : null,
+                    oldState.channelId && !newState.channelId ? now : null,
+                ]
+            );
 
-      if (!joined && !left) return; // skip moves or mute/unmute
+            // Track rapid join/leave
+            if (!rapidJoinLeaveMap.has(userId)) rapidJoinLeaveMap.set(userId, []);
+            const timestamps = rapidJoinLeaveMap.get(userId);
 
-      // Fetch user record
-      let user = await db.get(`SELECT * FROM users WHERE id = ?`, [userId]);
-      if (!user) {
-        await db.run(
-          `INSERT INTO users (id, join_leave_count, last_join_leave, vc_lock_expiration) VALUES (?, 0, 0, 0)`,
-          [userId]
-        );
-        user = await db.get(`SELECT * FROM users WHERE id = ?`, [userId]);
-      }
+            // Add timestamp if user left quickly
+            if (!newState.channelId && oldState.channelId) {
+                timestamps.push(now);
 
-      // Reset count if outside time window
-      if (now - user.last_join_leave > timeWindow) {
-        user.join_leave_count = 0;
-      }
+                // Remove old timestamps beyond time window
+                while (timestamps.length && now - timestamps[0] > TIME_WINDOW) timestamps.shift();
 
-      // Update counts
-      user.join_leave_count += 1;
-      user.last_join_leave = now;
-      await db.run(
-        `UPDATE users SET join_leave_count = ?, last_join_leave = ? WHERE id = ?`,
-        [user.join_leave_count, user.last_join_leave, userId]
-      );
+                // Check if limit exceeded
+                if (timestamps.length >= RAPID_LIMIT) {
+                    const guild = oldState.guild;
+                    const member = guild.members.cache.get(userId);
+                    if (member) {
+                        // Deny connect permission in all voice channels for 1hr
+                        guild.channels.cache.forEach(async (channel) => {
+                            if (channel.isVoiceBased()) {
+                                await channel.permissionOverwrites.edit(member, {
+                                    Connect: false,
+                                });
+                            }
+                        });
 
-      // Check for lock condition
-      if (user.join_leave_count >= joinLeaveThreshold) {
-        const channel = joined ? newState.channel : oldState.channel;
-        if (channel) {
-          await channel.permissionOverwrites.edit(userId, { Connect: false });
-          const expiration = now + lockDuration;
-          await db.run(
-            `UPDATE users SET vc_lock_expiration = ? WHERE id = ?`,
-            [expiration, userId]
-          );
-          await logToDB("VC_LOCK", `User ${userId} locked from ${channel.name} for 1hr`);
-          console.log(`🔒 [VC] User ${userId} locked from ${channel.name} for 1hr`);
+                        console.log(`🔒 ${member.user.tag} locked out of VC for 1 hour (rapid join/leave)`);
+
+                        // Clear timestamps
+                        rapidJoinLeaveMap.delete(userId);
+
+                        // Schedule unlock
+                        setTimeout(async () => {
+                            const memberToUnlock = guild.members.cache.get(userId);
+                            if (memberToUnlock) {
+                                guild.channels.cache.forEach(async (channel) => {
+                                    if (channel.isVoiceBased()) {
+                                        await channel.permissionOverwrites.edit(memberToUnlock, {
+                                            Connect: null,
+                                        });
+                                    }
+                                });
+                                console.log(`🔓 ${memberToUnlock.user.tag} VC lock expired`);
+                            }
+                        }, LOCK_DURATION);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("❌ VC Management error:", err);
         }
-      }
-
-      // Unlock after duration (lazy check on next event)
-      if (user.vc_lock_expiration && now > user.vc_lock_expiration) {
-        const channels = client.channels.cache.filter(c => c.isVoice());
-        for (const channel of channels.values()) {
-          await channel.permissionOverwrites.edit(userId, { Connect: null });
-        }
-        await db.run(`UPDATE users SET vc_lock_expiration = 0, join_leave_count = 0 WHERE id = ?`, [
-          userId
-        ]);
-        await logToDB("VC_UNLOCK", `User ${userId} unlocked from all VC channels`);
-        console.log(`🔓 [VC] User ${userId} unlocked from all VC channels`);
-      }
-    } catch (err) {
-      console.error("❌ [VC] Error handling voiceStateUpdate:", err);
-    }
-  });
+    });
 }
