@@ -1,26 +1,61 @@
-// modules/lfSquad.js
-import User from "../models/User.js";
+// ==========================
+// Module: LF$ (Looking For $quad)
+// Function: Helps users find other players for games
+// Author: VyBz / Dex
+// ==========================
 
-export async function requestSquad(client, userId, game, guildId) {
-  const guild = client.guilds.cache.get(guildId);
-  if (!guild) return { message: "Guild not found." };
+import { PermissionsBitField } from "discord.js";
 
-  const user = await User.findOne({ userId }) || new User({ userId });
-  user.squadRequests.push({ game });
-  await user.save();
+/**
+ * LF$ module
+ * Handles users requesting other players for games
+ */
+export default function setupLFSquad(client) {
+  client.on("messageCreate", async (message) => {
+    if (message.author.bot) return;
 
-  // Example: DM users with matching roles
-  const roleName = `game-${game.toLowerCase()}`;
-  const role = guild.roles.cache.find(r => r.name.toLowerCase() === roleName);
-  if (!role) return { message: `No one with role ${roleName} found.` };
+    // Command: !lf <game>
+    if (message.content.startsWith("!lf ")) {
+      const gameName = message.content.slice(4).trim();
+      if (!gameName)
+        return message.reply("Yo, you gotta tell me the game, fam! 🎮");
 
-  role.members.forEach(member => {
-    if (!member.user.bot && member.user.id !== userId) {
-      try {
-        member.send(`🎮 VyBz says: ${message.author.username} is looking for a squad for ${game}!`);
-      } catch {}
+      const guild = message.guild;
+      if (!guild) return;
+
+      // Find role for that game
+      const gameRole = guild.roles.cache.find(
+        (role) => role.name.toLowerCase() === gameName.toLowerCase()
+      );
+
+      if (!gameRole)
+        return message.reply(
+          `No squad exists for **${gameName}** yet! Start one by creating the role!`
+        );
+
+      // Filter members who have the role and can be DMed
+      const membersToDM = gameRole.members.filter(
+        (m) => !m.user.bot
+      );
+
+      // DM the members
+      membersToDM.forEach(async (member) => {
+        try {
+          await member.send(
+            `Yo ${member.user.username}, VyBz here 🌀: ${message.author.username} is lookin' for a squad for **${gameName}**! Wanna join the fun?`
+          );
+        } catch (err) {
+          console.log(
+            `%c[LF$] Could not DM ${member.user.tag}: ${err.message}`,
+            "color: red;"
+          );
+        }
+      });
+
+      // Confirm to the requesting user
+      message.reply(
+        `Squad alert sent for **${gameName}**! VyBz got your back. 🔥`
+      );
     }
   });
-
-  return { message: `VyBz sent out your squad request for ${game}.` };
 }
