@@ -1,20 +1,18 @@
-// ─────────────────────────────────────────────
-// ⚙️ Server Management Module
-// Handles guild joins, leaves, and basic server setup
-// ─────────────────────────────────────────────
+/**
+ * ===============================
+ * Server Management Utilities
+ * ===============================
+ */
 
-export default function setupServerManagement(client) {
-  try {
-    client.on("guildCreate", guild => {
-      console.log(`[SERVER-MANAGER] Joined new guild: ${guild.name} (${guild.id})`);
-      // Setup default roles/channels if needed
-    });
-
-    client.on("guildDelete", guild => {
-      console.log(`[SERVER-MANAGER] Removed from guild: ${guild.name} (${guild.id})`);
-    });
-
-  } catch (error) {
-    console.error("[SERVER-MANAGER] ❌ Error initializing module:", error);
-  }
+export function setupServerManagement(client, db) {
+  // Example: welcome new members
+  client.on('guildMemberAdd', async (member) => {
+    try {
+      console.log(`[SERVER] New member joined: ${member.user.tag}`);
+      // Optional: DB insert
+      await db.run('INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)', member.id, member.user.username);
+    } catch (err) {
+      console.error('[SERVER MANAGEMENT ERROR]', err);
+    }
+  });
 }
