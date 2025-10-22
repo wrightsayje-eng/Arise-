@@ -1,32 +1,17 @@
 {
-  "name": "dex-vybz",
+  "name": "vybz-bot",
   "version": "1.0.0",
-  "description": "A custom Discord bot built by Saber & Dex (VyBz) with server management, moderation, AI chat, and leveling systems.",
+  "description": "VyBz Discord bot by Saber & Dex",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "20.11.1"
-  },
   "dependencies": {
-    "discord.js": "^14.16.3",
-    "mongoose": "^7.6.3",
-    "express": "^4.19.2",
+    "chalk": "^5.3.0",
+    "discord.js": "^15.8.0",
     "dotenv": "^16.3.1",
-    "chalk": "^5.3.0"
-  },
-  "keywords": [
-    "discord",
-    "bot",
-    "discord.js",
-    "AI",
-    "VyBz",
-    "Dex",
-    "moderation",
-    "server-management"
-  ],
-  "author": "Saber & Dex",
-  "license": "MIT"
+    "express": "^4.19.2",
+    "mongoose": "^8.3.2"
+  }
 }
