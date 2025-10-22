@@ -1,109 +1,63 @@
-/**
- * =============================================
- *  【ＤｅＸ　ＶｙＢｚ】 Discord Bot - Index
- *  Modern ES Modules + SQLite Integration
- * =============================================
- */
+/* ===================================================
+   【ＤｅＸ　ＶｙＢｚ】 Bot Index
+   Modern ES Modules | SQLite Integration | Clean Setup
+   =================================================== */
 
-import 'dotenv/config';
-import express from 'express';
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import { Client, GatewayIntentBits, Partials } from "discord.js";
+import dotenv from "dotenv";
 
-// --------------------
-// EXPRESS SERVER SETUP
-// --------------------
-const app = express();
-const PORT = process.env.PORT || 3000;
+// --- Modules ---
+import monitorPermAbuse from "./modules/antiPermAbuse.js";
+import setupServerManagement from "./modules/serverManagement.js";
+import handleChatInteraction from "./modules/chatInteraction.js";
+import handleLeveling from "./modules/leveling.js";
+import lfSquad from "./modules/lfSquad.js";
+import { connectDB } from "./modules/sqliteDatabase.js";
 
-app.get('/', (req, res) => res.send('VyBz is online! 💫'));
-app.listen(PORT, () => console.log(`[EXPRESS] Keep-alive server running on port ${PORT}`));
+// --- Environment ---
+dotenv.config();
+const TOKEN = process.env.BOT_TOKEN;
 
-// --------------------
-// SQLITE DATABASE SETUP
-// --------------------
-let db;
-(async () => {
-  db = await open({
-    filename: './database/bot.sqlite', // Ensure folder exists, do not push .sqlite to GitHub
-    driver: sqlite3.Database
-  });
-
-  // Optional: create tables if not exist
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT,
-      xp INTEGER DEFAULT 0,
-      level INTEGER DEFAULT 1
-    );
-    CREATE TABLE IF NOT EXISTS afk (
-      user_id TEXT PRIMARY KEY,
-      reason TEXT,
-      expires_at INTEGER
-    );
-    CREATE TABLE IF NOT EXISTS squad (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT,
-      squad_name TEXT,
-      timestamp INTEGER
-    );
-  `);
-
-  console.log('[SQLITE] Database initialized successfully ✅');
-})();
-
-// --------------------
-// DISCORD CLIENT SETUP
-// --------------------
+// --- Discord Client Setup ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
-// --------------------
-// MODULE IMPORTS
-// --------------------
-import monitorPermAbuse from './modules/antiPermAbuse.js';
-import setupServerManagement from './modules/serverManagement.js';
-import setupVCManagement from './modules/vcManagement.js';
-import chatInteraction from './modules/chatInteraction.js';
-import levelingSystem from './modules/leveling.js';
-import lfSquad from './modules/lfSquad.js';
+// --- Database Connection ---
+try {
+  await connectDB();
+  console.log("[SQLITE] Database connected successfully ✅");
+} catch (err) {
+  console.error("[SQLITE] Database connection failed ❌", err);
+}
 
-// --------------------
-// EVENT: CLIENT READY
-// --------------------
-client.once('clientReady', async () => {
+// --- Ready Event ---
+client.on("clientReady", () => {
   console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
-  
-  // Initialize modules
-  monitorPermAbuse(client, db);
-  setupServerManagement(client, db);
-  setupVCManagement(client, db);
-  chatInteraction(client, db);
-  levelingSystem(client, db);
-  lfSquad(client, db);
-
-  console.log('[SYSTEM] Modules loaded successfully.');
 });
 
-// --------------------
-// LOGIN
-// --------------------
-client.login(process.env.BOT_TOKEN);
+// --- Load Modules ---
+monitorPermAbuse(client);
+setupServerManagement(client);
+handleChatInteraction(client);
+handleLeveling(client);
+lfSquad(client);
 
-// --------------------
-// ERROR HANDLING
-// --------------------
-client.on('error', (err) => console.error('[DISCORD CLIENT ERROR]', err));
-process.on('unhandledRejection', (reason, p) => {
-  console.error('[UNHANDLED REJECTION]', reason);
-});
+// --- Login ---
+client.login(TOKEN)
+  .then(() => console.log("[LOGIN] Bot connected to Discord successfully ✅"))
+  .catch((err) => console.error("[LOGIN] Discord connection failed ❌", err));
+
+// --- Keep-alive for Render ---
+import express from "express";
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => res.send("VyBz Bot is running!"));
+app.listen(PORT, () => console.log(`[EXPRESS] Keep-alive server running on port ${PORT}`));
