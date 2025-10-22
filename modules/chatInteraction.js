@@ -1,23 +1,33 @@
-// modules/chatInteraction.js
-import User from "../models/User.js";
+// ─────────────────────────────────────────────
+// 💬 Chat Interaction Module
+// Greets new users, handles verification, witty responses
+// ─────────────────────────────────────────────
 
-export async function handleChatMessage(message) {
-  if (message.author.bot) return;
+export default function setupChatInteraction(client) {
+  client.on("messageCreate", async message => {
+    try {
+      if (message.author.bot) return;
 
-  const user = await User.findOne({ userId: message.author.id }) || new User({ userId: message.author.id });
+      // Unique greeting example
+      if (message.content.toLowerCase().includes("hi") || message.content.toLowerCase().includes("hello")) {
+        const greetings = [
+          `Yo ${message.author.username}, VyBz just flexed in!`,
+          `What's good ${message.author.username}? VyBz here!`,
+          `Ayy ${message.author.username}, welcome to the vibes!`
+        ];
+        const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+        message.channel.send(randomGreeting);
+      }
 
-  // Example: verification auto-reply
-  if (message.content.toLowerCase().includes("verify")) {
-    message.reply(`Yo! To get verified, head to the #AutoVerify channel. Need express? VyBz can ping the admins if you know the password 😉`);
-  }
+      // Verification example
+      if (message.content.toLowerCase().includes("verify")) {
+        message.channel.send(
+          `${message.author}, slide into the **#autoverify** channel. If you're known, I can ping admins for express verification 😉`
+        );
+      }
 
-  // Example: AFK whitelist
-  if (message.content.toLowerCase() === "!afkwhitelist") {
-    const now = new Date();
-    user.afkWhitelist = new Date(now.getTime() + 3 * 60 * 60 * 1000); // 3 hrs
-    await user.save();
-    message.reply("✅ VyBz has whitelisted you from AFK checks for 3 hours.");
-  }
-
-  await user.save();
+    } catch (error) {
+      console.error("[CHAT-INTERACT] ❌ Error handling message:", error);
+    }
+  });
 }
