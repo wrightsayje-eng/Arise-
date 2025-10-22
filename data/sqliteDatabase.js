@@ -2,7 +2,7 @@
  * =============================================
  *  sqliteDatabase.js
  *  Async sqlite3 wrapper using `sqlite` + `sqlite3`
- *  Exports: initDB(), getRow(sql, params), all(sql, params), run(sql, params)
+ *  Exports: initDB(), getRow(), all(), run()
  * =============================================
  */
 
@@ -12,9 +12,9 @@ import path from 'path';
 import fs from 'fs';
 import chalk from 'chalk';
 
-const DB_PATH = process.env.SQLITE_PATH || './data/botDatabase.sqlite';
+const DB_PATH = process.env.SQLITE_PATH || './src/data/botDatabase.sqlite';
 
-export let db; // exported live DB handle after init
+export let db; // will be assigned after init
 
 export async function initDB() {
   // ensure folder exists
@@ -26,10 +26,15 @@ export async function initDB() {
     driver: sqlite3.Database
   });
 
-  // Create core tables (idempotent)
-  await db.exec(`
-    PRAGMA journal_mode = WAL;
+  // Recommended PRAGMA for concurrency/performance
+  try {
+    await db.exec('PRAGMA journal_mode = WAL;');
+  } catch (e) {
+    console.warn(chalk.yellow('[SQLITE] Warning setting WAL mode:'), e?.message || e);
+  }
 
+  // create tables (idempotent)
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT,
@@ -56,7 +61,7 @@ export async function initDB() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT,
       guild_id TEXT,
-      event TEXT,
+      event TEXT, -- 'join' | 'leave'
       ts INTEGER
     );
 
@@ -69,7 +74,7 @@ export async function initDB() {
     );
   `);
 
-  console.log(chalk.green('[SQLITE] Tables ensured (users, afk, lfsquad, vc_joinlog, infractions)'));
+  console.log(chalk.green('[SQLITE] Tables ensured: users, afk, lfsquad, vc_joinlog, infractions'));
   return db;
 }
 
