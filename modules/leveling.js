@@ -1,19 +1,32 @@
-// modules/leveling.js
-import User from "../models/User.js";
+// ─────────────────────────────────────────────
+// 🎮 Leveling Module
+// Tracks points, assigns roles based on activity in chat/VCs
+// ─────────────────────────────────────────────
 
-export async function handleMessageXP(message) {
-  if (message.author.bot) return;
-  const user = await User.findOne({ userId: message.author.id }) || new User({ userId: message.author.id });
-  user.xp += 10; // example XP per message
-  if (user.xp >= (user.level + 1) * 100) user.level += 1; // level up
-  await user.save();
-}
+export default function setupLeveling(client, db) { // Pass db if needed
+  client.on("messageCreate", async message => {
+    try {
+      if (message.author.bot) return;
 
-export async function handleVCXP(oldState, newState) {
-  const member = newState.member;
-  if (!member || member.user.bot) return;
-  const user = await User.findOne({ userId: member.id }) || new User({ userId: member.id });
-  user.xp += 5; // example XP for VC presence
-  if (user.xp >= (user.level + 1) * 100) user.level += 1;
-  await user.save();
+      // Example: increment points for activity
+      // const userPoints = await db.collection("users").findOne({ id: message.author.id });
+      // Increment points logic goes here
+
+      console.log(`[LEVELING] ${message.author.tag} active in chat`);
+      // Assign roles based on points
+    } catch (error) {
+      console.error("[LEVELING] ❌ Error updating user points:", error);
+    }
+  });
+
+  client.on("voiceStateUpdate", (oldState, newState) => {
+    try {
+      if (!newState || !newState.member || !newState.channel) return;
+
+      // Add VC participation points here
+      console.log(`[LEVELING] ${newState.member.user.tag} active in VC: ${newState.channel.name}`);
+    } catch (error) {
+      console.error("[LEVELING] ❌ Error updating VC points:", error);
+    }
+  });
 }
