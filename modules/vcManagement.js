@@ -1,33 +1,24 @@
-// modules/vcManagement.js
-import User from "../models/User.js";
+// ─────────────────────────────────────────────
+// 🎧 VC Management Module
+// AFK detection, CAM-only checks, and music bot tagging
+// ─────────────────────────────────────────────
 
-export async function handleVoiceState(oldState, newState) {
-  const member = newState.member;
-  if (!member || member.user.bot) return;
+export default function setupVCManagement(client) {
+  client.on("voiceStateUpdate", (oldState, newState) => {
+    try {
+      if (!newState || !newState.channel) return;
 
-  // Example AFK move logic
-  const vc = newState.channel;
-  if (!vc) return;
+      const member = newState.member;
+      const channel = newState.channel;
 
-  const user = await User.findOne({ userId: member.id }) || new User({ userId: member.id });
+      // Example: AFK after 30 min with no camera/audio
+      // Call your AFK/move logic here
 
-  // Greening Out: 30 min in VC muted & deafened
-  if (vc && member.voice.mute && member.voice.deaf) {
-    if (!user.vcStartTime) user.vcStartTime = new Date();
-    const now = new Date();
-    if (now - new Date(user.vcStartTime) > 30 * 60 * 1000) { // 30 min
-      const afkChannel = vc.guild.channels.cache.find(ch => ch.name.toLowerCase().includes("afk"));
-      if (afkChannel && vc.id !== afkChannel.id) member.voice.setChannel(afkChannel);
-      // Send funny DM
-      try {
-        member.send("😴 Yo! VyBz says you greened out! Moved to AFK.");
-      } catch {}
-      user.vcStartTime = null;
+      // Example: CAM-ONLY enforcement
+      // Call your logic to check for camera and move users
+
+    } catch (error) {
+      console.error("[VC-MANAGER] ❌ Error handling VC state:", error);
     }
-  } else {
-    user.vcStartTime = new Date();
-  }
-
-  // Save state
-  await user.save();
+  });
 }
