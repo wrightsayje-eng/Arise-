@@ -1,1 +1,3 @@
 /database/bot.sqlite
+/src/data/*.sqlite
+/src/data/*.sqlite*
