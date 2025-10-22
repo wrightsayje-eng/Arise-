@@ -1,32 +1,32 @@
-// ─────────────────────────────────────────────
-// 🎮 Leveling Module
-// Tracks points, assigns roles based on activity in chat/VCs
-// ─────────────────────────────────────────────
+/**
+ * ===============================
+ * Leveling System
+ * ===============================
+ */
 
-export default function setupLeveling(client, db) { // Pass db if needed
-  client.on("messageCreate", async message => {
+export function levelingSystem(client, db) {
+  client.on('messageCreate', async (message) => {
     try {
       if (message.author.bot) return;
 
-      // Example: increment points for activity
-      // const userPoints = await db.collection("users").findOne({ id: message.author.id });
-      // Increment points logic goes here
+      // Add XP for messages
+      const user = await db.get('SELECT * FROM users WHERE id = ?', message.author.id);
+      if (user) {
+        let newXP = user.xp + 10; // Example increment
+        let newLevel = user.level;
 
-      console.log(`[LEVELING] ${message.author.tag} active in chat`);
-      // Assign roles based on points
-    } catch (error) {
-      console.error("[LEVELING] ❌ Error updating user points:", error);
-    }
-  });
+        // Level up every 100 XP
+        if (newXP >= newLevel * 100) {
+          newLevel++;
+          message.reply(`🎉 Congrats! You've leveled up to level ${newLevel}`);
+        }
 
-  client.on("voiceStateUpdate", (oldState, newState) => {
-    try {
-      if (!newState || !newState.member || !newState.channel) return;
-
-      // Add VC participation points here
-      console.log(`[LEVELING] ${newState.member.user.tag} active in VC: ${newState.channel.name}`);
-    } catch (error) {
-      console.error("[LEVELING] ❌ Error updating VC points:", error);
+        await db.run('UPDATE users SET xp = ?, level = ? WHERE id = ?', newXP, newLevel, message.author.id);
+      } else {
+        await db.run('INSERT INTO users (id, username, xp, level) VALUES (?, ?, ?, ?)', message.author.id, message.author.username, 10, 1);
+      }
+    } catch (err) {
+      console.error('[LEVELING SYSTEM ERROR]', err);
     }
   });
 }
