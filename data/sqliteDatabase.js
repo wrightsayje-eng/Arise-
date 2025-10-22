@@ -1,51 +1,57 @@
-// ⛩️ DexBot SQLite Database v0.1
-// ✅ Uses modern async SQLite with sqlite3 backend
-// ✅ Automatically creates database file if missing
-// ✅ Logs connection status in a clean format
+// 💾 sqliteDatabase.js v0.2
+// DexBot persistent data layer — pure sqlite3 implementation.
 
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Resolve current directory for ESM
+sqlite3.verbose();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Database path inside /root/data
-const dbPath = path.resolve(__dirname, 'dexbot.sqlite');
-
-// Initialize database
 let db;
 
 export async function initDatabase() {
-	try {
-		db = await open({
-			filename: dbPath,
-			driver: sqlite3.Database,
-		});
+  if (db) return db;
 
-		console.log('🧠 DexBot SQLite Connected:', dbPath);
+  const dbPath = path.join(__dirname, 'dexbot.sqlite'); // stored in /data
+  db = await open({
+    filename: dbPath,
+    driver: sqlite3.Database,
+  });
 
-		// Example default table
-		await db.exec(`
-			CREATE TABLE IF NOT EXISTS user_activity (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				user_id TEXT NOT NULL,
-				event_type TEXT NOT NULL,
-				timestamp INTEGER NOT NULL
-			);
-		`);
+  console.log('✅ DexBot SQLite database initialized at', dbPath);
 
-		console.log('📦 Tables verified and ready');
-		return db;
-	} catch (err) {
-		console.error('❌ Database initialization failed:', err);
-		process.exit(1);
-	}
+  // Core table setup — add any others here.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT,
+      joinedAt INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS vc_activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT,
+      channelId TEXT,
+      joinedAt INTEGER,
+      leftAt INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event TEXT,
+      details TEXT,
+      timestamp INTEGER
+    );
+  `);
+
+  return db;
 }
 
 export function getDB() {
-	if (!db) throw new Error('Database not initialized! Call initDatabase() first.');
-	return db;
+  if (!db) throw new Error('❌ Database not initialized — call initDatabase() first.');
+  return db;
 }
