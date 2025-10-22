@@ -1,0 +1,39 @@
+/**
+ * 【ＤｅＸ　ＶｙＢｚ】 Database Module
+ * Handles all persistent storage via SQLite
+ */
+
+import Database from "better-sqlite3";
+
+// Create or open SQLite database
+const db = new Database("./vybz_data.sqlite");
+
+// Initialize tables if they don't exist
+db.prepare(`
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    afk_status TEXT,
+    afk_until INTEGER,
+    leveling_xp INTEGER DEFAULT 0,
+    leveling_level INTEGER DEFAULT 1
+)
+`).run();
+
+db.prepare(`
+CREATE TABLE IF NOT EXISTS lfsquad (
+    id TEXT PRIMARY KEY,
+    message TEXT,
+    created_at INTEGER
+)
+`).run();
+
+// Export query functions
+export const getUser = (id) => db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+export const addUser = (id) => db.prepare("INSERT OR IGNORE INTO users(id) VALUES (?)").run(id);
+export const updateUser = (id, column, value) => db.prepare(`UPDATE users SET ${column} = ? WHERE id = ?`).run(value, id);
+
+export const getSquad = (id) => db.prepare("SELECT * FROM lfsquad WHERE id = ?").get(id);
+export const addSquad = (id, message) => db.prepare("INSERT OR REPLACE INTO lfsquad(id, message, created_at) VALUES (?, ?, ?)").run(id, message, Date.now());
+export const removeSquad = (id) => db.prepare("DELETE FROM lfsquad WHERE id = ?").run(id);
+
+export default db;
