@@ -1,43 +1,85 @@
-// ────────────────────────────────
-// 【ＤｅＸ】 SQLite Database Connection
-// ────────────────────────────────
+/**
+ * =============================================
+ *  sqliteDatabase.js
+ *  Async sqlite3 wrapper using `sqlite` + `sqlite3`
+ *  Exports: initDB(), getRow(sql, params), all(sql, params), run(sql, params)
+ * =============================================
+ */
 
-import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
+import path from 'path';
+import fs from 'fs';
+import chalk from 'chalk';
 
-// Define database file path inside your project
-const dbFilePath = path.resolve("./data/session18.sqlite");
+const DB_PATH = process.env.SQLITE_PATH || './data/botDatabase.sqlite';
 
-// Ensure the folder exists
-const dbFolder = path.dirname(dbFilePath);
-if (!fs.existsSync(dbFolder)) fs.mkdirSync(dbFolder, { recursive: true });
+export let db; // exported live DB handle after init
 
-// Open SQLite database (creates file if it doesn't exist)
-const db = new Database(dbFilePath, { verbose: console.log });
+export async function initDB() {
+  // ensure folder exists
+  const folder = path.dirname(DB_PATH);
+  if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
-// Optional: initialize tables if they don’t exist
-const initTables = () => {
-  db.prepare(`
+  db = await open({
+    filename: DB_PATH,
+    driver: sqlite3.Database
+  });
+
+  // Create core tables (idempotent)
+  await db.exec(`
+    PRAGMA journal_mode = WAL;
+
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT,
+      xp INTEGER DEFAULT 0,
       level INTEGER DEFAULT 1,
-      xp INTEGER DEFAULT 0
-    )
-  `).run();
+      vc_seconds INTEGER DEFAULT 0
+    );
 
-  db.prepare(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    )
-  `).run();
-};
+    CREATE TABLE IF NOT EXISTS afk (
+      user_id TEXT PRIMARY KEY,
+      reason TEXT,
+      expires_at INTEGER
+    );
 
-// Initialize tables
-initTables();
+    CREATE TABLE IF NOT EXISTS lfsquad (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      game TEXT,
+      message TEXT,
+      created_at INTEGER
+    );
 
-console.log("🟢 [SQLITE] Database connected and ready");
+    CREATE TABLE IF NOT EXISTS vc_joinlog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      guild_id TEXT,
+      event TEXT,
+      ts INTEGER
+    );
 
-export default db;
+    CREATE TABLE IF NOT EXISTS infractions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      type TEXT,
+      reason TEXT,
+      created_at INTEGER
+    );
+  `);
+
+  console.log(chalk.green('[SQLITE] Tables ensured (users, afk, lfsquad, vc_joinlog, infractions)'));
+  return db;
+}
+
+// helpers
+export async function getRow(sql, params = []) {
+  return db.get(sql, params);
+}
+export async function all(sql, params = []) {
+  return db.all(sql, params);
+}
+export async function run(sql, params = []) {
+  return db.run(sql, params);
+}
