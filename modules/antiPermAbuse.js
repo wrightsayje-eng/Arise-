@@ -1,21 +1,23 @@
 // ─────────────────────────────────────────────
-// 🛡️ Anti-Permission Abuse Monitor
-// Watches for suspicious permission changes in voice channels
+// 🛡️ Anti-Permission Abuse Module
+// Monitors staff actions in VCs to prevent abuse
 // ─────────────────────────────────────────────
 
-export default function monitorPermAbuse(oldState, newState) {
-  try {
-    const member = newState?.member;
-    if (!member) return; // Skip if there's no valid member
+export default function monitorPermAbuse(client) {
+  client.on("voiceStateUpdate", (oldState, newState) => {
+    try {
+      if (!newState || !newState.member) return;
 
-    // Example check — customize as needed later
-    if (newState.channelId && oldState.channelId !== newState.channelId) {
-      console.log(`[SECURITY] ${member.user.tag} switched channels.`);
+      const member = newState.member;
+
+      // Example check: muting/unmuting abuse prevention
+      // Replace with actual abuse logic
+      console.log(`[ANTI-PERM] Monitoring perms for ${member.user.tag}`);
+      
+      // Future logic: undo excessive mutes/deafens
+
+    } catch (error) {
+      console.error("[ANTI-PERM] ❌ Error monitoring VC permissions:", error);
     }
-
-    // Add more permission abuse detection logic here later...
-
-  } catch (error) {
-    console.error("[ANTI-PERM-ABUSE] ❌ Error detected:", error);
-  }
+  });
 }
