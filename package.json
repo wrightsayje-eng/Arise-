@@ -1,0 +1,32 @@
+{
+  "name": "dex-vybz",
+  "version": "1.0.0",
+  "description": "VyBz - Discord bot with Lil Wayne personality, AFK, LF$, leveling, poaching protection, and more.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "afk",
+    "lf$",
+    "leveling",
+    "poaching",
+    "vybz"
+  ],
+  "author": "Saber & Dex",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "discord.js": "^15.8.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^7.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
