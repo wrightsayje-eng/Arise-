@@ -1,79 +1,77 @@
-// 🧩 DEX VYBZ MAIN INDEX FILE
-// --------------------------------------------
-// Version: v1.0
-// Framework: Discord.js v15
-// Database: MongoDB via Mongoose
-// Hosting: Render (Web Service compatible)
-// Author: Saber & Dex 😎
-// --------------------------------------------
+// 🧩 DEX VYBZ MAIN INDEX // Version: v1.0
+// ==========================
+// VyBz Discord Bot
+// Author: Dex (Saber's Bot)
+// Version: 1.0
+// Description: All-in-one server management, moderation, leveling, LF$, social, and AI interaction
+// ==========================
 
-// ===== [ MODULE // 
-// index.js
+import "dotenv/config";
 import express from "express";
-import chalk from "chalk";
-import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
-import mongoose from "mongoose";
-import dotenv from "dotenv";
+import { Client, GatewayIntentBits } from "discord.js";
+import { MongoClient } from "mongodb";
 
-import monitorPermAbuse from "./modules/antiPermAbuse.js";
+// ==== Module Imports ====
 import setupServerManagement from "./modules/serverManagement.js";
+import monitorVCManagement from "./modules/vcManagement.js";
+import monitorPermAbuse from "./modules/antiPermAbuse.js";
+import setupChatInteraction from "./modules/chatInteraction.js";
+import setupLeveling from "./modules/leveling.js";
+import setupLFSquad from "./modules/lfSquad.js";
 
-dotenv.config();
+// ==== Express Keep-Alive Server ====
 const app = express();
+app.get("/", (req, res) => res.send("VyBz is flexin' online 💫"));
 const PORT = process.env.PORT || 3000;
-
-// ========== EXPRESS KEEP-ALIVE SERVER ==========
-app.get("/", (req, res) => res.send("💫 VyBz Bot is Alive and Flexin’!"));
 app.listen(PORT, () =>
-  console.log(chalk.cyan(`[EXPRESS] Keep-alive server running on port ${PORT}`))
+  console.log(`[EXPRESS] Keep-alive server running on port ${PORT}`)
 );
 
-// ========== MONGO CONNECTION ==========
-const mongoURI = process.env.MONGO_URI;
-
-mongoose
-  .connect(mongoURI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log(chalk.green("[MONGO] Database connected ✅")))
-  .catch((err) =>
-    console.log(chalk.red("[MONGO] Database connection failed ❌"), err)
-  );
-
-// ========== DISCORD CLIENT ==========
+// ==== Discord Client Setup ====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.GuildMember],
 });
 
-// ========== ON READY ==========
-client.once(Events.ClientReady, (readyClient) => {
-  console.log(
-    chalk.greenBright(
-      `\n💫 ${readyClient.user.username} is online and flexin’ as ${readyClient.user.tag}`
-    )
-  );
+// ==== MongoDB Connection ====
+const mongoURI = process.env.MONGO_URI;
+const mongoClient = new MongoClient(mongoURI);
+try {
+  await mongoClient.connect();
+  console.log("%c[MONGO] Database connected successfully ✅", "color: green;");
+} catch (err) {
+  console.log(`%c[MONGO] Database connection failed ❌ ${err}`, "color: red;");
+}
 
-  console.log(chalk.yellow("[SYSTEM] Modules loaded successfully."));
-  setupServerManagement(client);
+// ==== Event: Bot Ready ====
+client.on("clientReady", () => {
+  console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
 });
 
-// ========== VOICE STATE / PERMISSION MONITOR ==========
-client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-  if (!newState || !newState.member) return; // Prevents crash
-  monitorPermAbuse(oldState, newState);
+// ==== Module Initialization ====
+setupServerManagement(client, mongoClient);
+monitorVCManagement(client, mongoClient);
+monitorPermAbuse(client);
+setupChatInteraction(client, mongoClient);
+setupLeveling(client, mongoClient);
+setupLFSquad(client);
+
+// ==== Login ====
+client.login(process.env.DISCORD_TOKEN).then(() => {
+  console.log("%c[LOGIN] VyBz connected to Discord successfully ✅", "color: cyan;");
 });
 
-// ========== LOGIN ==========
-client.login(process.env.TOKEN).then(() => {
-  console.log(chalk.magenta("[LOGIN] VyBz connected to Discord successfully ✅"));
-}).catch((err) => {
-  console.log(chalk.red("[LOGIN] Failed to connect to Discord ❌"), err);
-});
+// ==== Global Error Handling ====
+process.on("unhandledRejection", (error) =>
+  console.log(`%c[ERROR] Unhandled promise rejection: ${error}`, "color: red;")
+);
+
+process.on("uncaughtException", (error) =>
+  console.log(`%c[ERROR] Uncaught exception: ${error}`, "color: red;")
+);
