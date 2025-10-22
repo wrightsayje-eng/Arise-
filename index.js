@@ -8,93 +8,58 @@
 // --------------------------------------------
 
 // ===== [ MODULE IMPORTS ] =====
-import express from "express";
-import { Client, GatewayIntentBits, Partials, Collection } from "discord.js";
-import mongoose from "mongoose";
-import chalk from "chalk";
-import dotenv from "dotenv";
+// index.js
+import { Client, GatewayIntentBits } from 'discord.js';
+import { monitorPermAbuse } from './modules/antiPermAbuse.js';
+import dotenv from 'dotenv';
+import express from 'express';
+import mongoose from 'mongoose';
 
-// ===== [ ENV SETUP ] =====
 dotenv.config();
-const app = express();
-const PORT = process.env.PORT || 3000;
 
-// ===== [ EXPRESS KEEP-ALIVE ] =====
-app.get("/", (req, res) => {
-  res.send("VyBz is vibin’ 🧠💨");
-});
-app.listen(PORT, () => {
-  console.log(chalk.greenBright(`[EXPRESS] Keep-alive server running on port ${PORT}`));
-});
-
-// ===== [ DISCORD CLIENT SETUP ] =====
+// -------------------
+// Client Setup
+// -------------------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.MessageContent,
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.User],
 });
 
-client.commands = new Collection();
+// -------------------
+// Express Keep-Alive
+// -------------------
+const app = express();
+app.get('/', (req, res) => res.send('VyBz is online'));
+app.listen(3000, () => console.log('[EXPRESS] Keep-alive server running on port 3000'));
 
-// ===== [ MONGO CONNECTION ] =====
-(async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log(chalk.cyanBright("[MONGO] Database connection established ✅"));
-  } catch (err) {
-    console.error(chalk.redBright("[MONGO] Database connection failed ❌"), err);
-  }
-})();
+// -------------------
+// MongoDB Connection
+// -------------------
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('[MONGO] Database connected successfully ✅'))
+  .catch(err => console.error('[MONGO] Database connection failed ❌', err));
 
-// ===== [ MODULE IMPORTS ] =====
-import { runPoachingScan, enforcePoachingDeadlines } from "./modules/serverManagement.js";
-import { handleVoiceState } from "./modules/vcManagement.js";
-import { handleChatMessage } from "./modules/chatInteraction.js";
-import { requestSquad } from "./modules/lfSquad.js";
-import { monitorPermAbuse } from "./modules/antiPermAbuse.js";
-import { handleMessageXP, handleVCXP } from "./modules/leveling.js";
+// -------------------
+// Event Listeners
+// -------------------
 
-// ===== [ READY EVENT ] =====
-client.once("ready", async () => {
-  console.log(chalk.magentaBright(`\n💫 VyBz is online and flexin’ as ${client.user.tag}`));
-  console.log(chalk.yellowBright("[SYSTEM] Modules loaded successfully."));
-  runPoachingScan(client);
-  enforcePoachingDeadlines(client);
-  monitorPermAbuse(client);
+// clientReady replaces ready event in v15
+client.on('clientReady', () => {
+  console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
 });
 
-// ===== [ MESSAGE HANDLER ] =====
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  try {
-    handleChatMessage(message);
-    handleMessageXP(message);
-    requestSquad(message);
-  } catch (err) {
-    console.error(chalk.redBright(`[MESSAGE ERROR] ${err.message}`));
-  }
+// Voice State Update (anti-perm abuse)
+client.on('voiceStateUpdate', (oldState, newState) => {
+  monitorPermAbuse(oldState, newState);
 });
 
-// ===== [ VOICE STATE HANDLER ] =====
-client.on("voiceStateUpdate", async (oldState, newState) => {
-  try {
-    handleVoiceState(oldState, newState);
-    handleVCXP(newState);
-  } catch (err) {
-    console.error(chalk.redBright(`[VC ERROR] ${err.message}`));
-  }
-});
+// -------------------
+// Additional modules can be imported and initialized here
+// e.g., serverManagement, vcManagement, leveling, LF$ etc.
+// -------------------
 
-// ===== [ LOGIN ] =====
-client.login(process.env.BOT_TOKEN)
-  .then(() => console.log(chalk.greenBright("[LOGIN] VyBz connected to Discord successfully ✅")))
-  .catch((err) => console.error(chalk.redBright("[LOGIN ERROR]"), err));
+client.login(process.env.BOT_TOKEN);
