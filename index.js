@@ -7,59 +7,73 @@
 // Author: Saber & Dex 😎
 // --------------------------------------------
 
-// ===== [ MODULE IMPORTS ] =====
+// ===== [ MODULE // 
 // index.js
-import { Client, GatewayIntentBits } from 'discord.js';
-import { monitorPermAbuse } from './modules/antiPermAbuse.js';
-import dotenv from 'dotenv';
-import express from 'express';
-import mongoose from 'mongoose';
+import express from "express";
+import chalk from "chalk";
+import { Client, GatewayIntentBits, Partials, Events } from "discord.js";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+
+import monitorPermAbuse from "./modules/antiPermAbuse.js";
+import setupServerManagement from "./modules/serverManagement.js";
 
 dotenv.config();
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-// -------------------
-// Client Setup
-// -------------------
+// ========== EXPRESS KEEP-ALIVE SERVER ==========
+app.get("/", (req, res) => res.send("💫 VyBz Bot is Alive and Flexin’!"));
+app.listen(PORT, () =>
+  console.log(chalk.cyan(`[EXPRESS] Keep-alive server running on port ${PORT}`))
+);
+
+// ========== MONGO CONNECTION ==========
+const mongoURI = process.env.MONGO_URI;
+
+mongoose
+  .connect(mongoURI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log(chalk.green("[MONGO] Database connected ✅")))
+  .catch((err) =>
+    console.log(chalk.red("[MONGO] Database connection failed ❌"), err)
+  );
+
+// ========== DISCORD CLIENT ==========
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
   ],
+  partials: [Partials.Message, Partials.Channel, Partials.GuildMember],
 });
 
-// -------------------
-// Express Keep-Alive
-// -------------------
-const app = express();
-app.get('/', (req, res) => res.send('VyBz is online'));
-app.listen(3000, () => console.log('[EXPRESS] Keep-alive server running on port 3000'));
+// ========== ON READY ==========
+client.once(Events.ClientReady, (readyClient) => {
+  console.log(
+    chalk.greenBright(
+      `\n💫 ${readyClient.user.username} is online and flexin’ as ${readyClient.user.tag}`
+    )
+  );
 
-// -------------------
-// MongoDB Connection
-// -------------------
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log('[MONGO] Database connected successfully ✅'))
-  .catch(err => console.error('[MONGO] Database connection failed ❌', err));
-
-// -------------------
-// Event Listeners
-// -------------------
-
-// clientReady replaces ready event in v15
-client.on('clientReady', () => {
-  console.log(`💫 VyBz is online and flexin’ as ${client.user.tag}`);
+  console.log(chalk.yellow("[SYSTEM] Modules loaded successfully."));
+  setupServerManagement(client);
 });
 
-// Voice State Update (anti-perm abuse)
-client.on('voiceStateUpdate', (oldState, newState) => {
+// ========== VOICE STATE / PERMISSION MONITOR ==========
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  if (!newState || !newState.member) return; // Prevents crash
   monitorPermAbuse(oldState, newState);
 });
 
-// -------------------
-// Additional modules can be imported and initialized here
-// e.g., serverManagement, vcManagement, leveling, LF$ etc.
-// -------------------
-
-client.login(process.env.BOT_TOKEN);
+// ========== LOGIN ==========
+client.login(process.env.TOKEN).then(() => {
+  console.log(chalk.magenta("[LOGIN] VyBz connected to Discord successfully ✅"));
+}).catch((err) => {
+  console.log(chalk.red("[LOGIN] Failed to connect to Discord ❌"), err);
+});
