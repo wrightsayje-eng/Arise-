@@ -1,9 +1,9 @@
 /**
  * =============================================
  *  【ＤｅＸ　ＶｙＢｚ】 — index.js
- *  Locked: DISCORD_TOKEN | Prefix: '$' | Dex responds to "Dex"
+ *  Canonical: DISCORD_TOKEN | Prefix: '$' | Dex responds to "Dex"
  *  SQLite3 (sqlite + sqlite3), ES modules, Discord.js v14
- *  Author: Dex for Saber — production prototype
+ *  Author: Dex for Saber
  * =============================================
  */
 
@@ -12,8 +12,8 @@ import express from 'express';
 import chalk from 'chalk';
 import { Client, GatewayIntentBits, Partials, Events } from 'discord.js';
 
-// Modules (all modules must export a single named function taking (client, db))
-import { initDB, getRow, run, all } from './modules/sqliteDatabase.js';
+// Modules
+import { initDB } from './modules/sqliteDatabase.js';
 import setupServerManagement from './modules/serverManagement.js';
 import setupVCManagement from './modules/vcManagement.js';
 import monitorPermAbuse from './modules/antiPermAbuse.js';
@@ -26,11 +26,11 @@ import setupLFSquad from './modules/lfSquad.js';
 // -----------------------------
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) {
-  console.error(chalk.red('[CONFIG] DISCORD_TOKEN not set in environment variables — aborting.'));
+  console.error(chalk.red('[CONFIG] DISCORD_TOKEN not set — aborting.'));
   process.exit(1);
 }
 const PREFIX = '$';
-const BOT_NAME = 'Dex'; // plain-text trigger
+const BOT_NAME = 'Dex';
 const PORT = process.env.PORT || 3000;
 
 // -----------------------------
@@ -55,37 +55,45 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.GuildMember],
 });
 
-// -----------------------------
-// Boot sequence (async init)
-// -----------------------------
+// Boot sequence
 (async () => {
   try {
-    // Initialize DB
+    // Init DB
     const db = await initDB();
     console.log(chalk.green('[SQLITE] Database initialized and ready ✅'));
 
-    // Attach DB helpers to client for modules that prefer client.db
+    // attach db and config to client for ease
     client.db = db;
     client.prefix = PREFIX;
+    client.botName = BOT_NAME;
 
-    // Initialize modules (they should register event handlers safely)
-    // Order: core management, moderation, features
-    setupServerManagement(client, db);    // server profile scanner, auto-warn/timeout
-    setupVCManagement(client, db);        // VC AFK, cam-only enforcement, join/leave spam lockout
-    monitorPermAbuse(client, db);         // anti perm abuse monitor & mitigation
-    setupChatInteraction(client, db);     // greetings, verification, "Dex" responses, prefix commands
-    setupLeveling(client, db);            // xp and leveling (text + voice points)
-    setupLFSquad(client, db);             // LF$ feature
+    // Initialize modules
+    setupServerManagement(client, db);
+    setupVCManagement(client, db);
+    monitorPermAbuse(client, db);
+    setupChatInteraction(client, db);
+    setupLeveling(client, db);
+    setupLFSquad(client, db);
 
-    // Client Ready
+    // Ready handler
     client.on(Events.ClientReady, (c) => {
       console.log(chalk.magentaBright(`\n💫 ${c.user.tag} is online — VyBz flexin' as ${c.user.username}`));
-      console.log(chalk.yellow('[SYSTEM] Modules loaded successfully.'));
+      console.log(chalk.yellow('[SYSTEM] Modules loaded successfully.\n'));
     });
 
-    // Login
+    // login
     await client.login(TOKEN);
-    console.log(chalk.cyan('[LOGIN] Discord login attempted — check above for success ✅'));
+    console.log(chalk.cyan('[LOGIN] Discord login attempt complete.'));
+
+    // global error handlers
+    process.on('unhandledRejection', (reason, p) => {
+      console.error(chalk.red('[UNHANDLED REJECTION]'), reason, p);
+    });
+    process.on('uncaughtException', (err) => {
+      console.error(chalk.red('[UNCAUGHT EXCEPTION]'), err);
+      // don't exit immediately in production—consider reporting and restarting safely
+    });
+
   } catch (err) {
     console.error(chalk.red('[BOOT] Fatal error during startup — aborting ❌'), err);
     process.exit(1);
