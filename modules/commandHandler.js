@@ -47,37 +47,47 @@ export default function setupCommandHandler(client) {
     };
 
     // ===== ADMIN COMMANDS =====
-    if (cmd === 'reboot') return safeExecute(async () => {
-      if (!isAdmin) return message.reply('❌ You do not have permission to reboot the bot.');
-      await message.reply('🔄 Rebooting DexVyBz...');
-      process.exit(0);
-    }, 'reboot');
+    if (cmd === 'reboot') {
+      return safeExecute(async () => {
+        if (!isAdmin) return message.reply('❌ You do not have permission to reboot the bot.');
+        await message.reply('🔄 Rebooting DexVyBz...');
+        process.exit(0);
+      }, 'reboot');
+    }
 
-    if (cmd === 'stats') return safeExecute(async () => {
-      if (!isAdmin) return message.reply('❌ Admins only.');
-      return message.reply(`📊 DexVyBz Stats — Users: ${message.guild.memberCount}`);
-    }, 'stats');
+    if (cmd === 'stats') {
+      return safeExecute(async () => {
+        if (!isAdmin) return message.reply('❌ Admins only.');
+        return message.reply(`📊 DexVyBz Stats — Users: ${message.guild.memberCount}`);
+      }, 'stats');
+    }
 
     // ===== STAFF COMMANDS =====
-    if (cmd === 'vc') return safeExecute(async () => {
-      if (!isStaff && !isAdmin) return message.reply('❌ Staff only.');
-      return message.reply('🎧 VC command received (placeholder)');
-    }, 'vc');
+    if (cmd === 'vc') {
+      return safeExecute(async () => {
+        if (!isStaff && !isAdmin) return message.reply('❌ Staff only.');
+        return message.reply('🎧 VC command received (placeholder)');
+      }, 'vc');
+    }
 
     // ===== DJ/MUSIC COMMANDS =====
     if (['join', 'leave', 'play', 'search'].includes(cmd)) {
       return safeExecute(async () => {
-        if (!isDJ && !isStaff && !isAdmin) return message.reply('❌ DJ role required for music commands.');
+        if (!isDJ && !isStaff && !isAdmin) {
+          return message.reply('❌ DJ role required for music commands.');
+        }
         setupMusicCommands(client, cmd, args, message);
       }, `music command: ${cmd}`);
     }
 
     // ===== GENERAL COMMANDS =====
-    if (cmd === 'help') return safeExecute(async () => {
-      return message.reply(
-        'Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, $join, $leave, $play, $search, $stats, $reboot'
-      );
-    }, 'help');
+    if (cmd === 'help') {
+      return safeExecute(async () => {
+        return message.reply(
+          'Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, $join, $leave, $play, $search, $stats, $reboot'
+        );
+      }, 'help');
+    }
 
     // ===== Module Handlers (Safe) =====
     const modules = [
