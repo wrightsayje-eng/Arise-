@@ -1,4 +1,4 @@
-// 🎵 musicCommands.js v1.4 Pro — Multi-Source + Queue + Fallback
+// 🎵 musicCommands.js v1.4.1 Pro — Multi-Source + Queue + Fallback
 import {
   joinVoiceChannel,
   getVoiceConnection,
@@ -60,6 +60,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
 
   let connection = getVoiceConnection(message.guild.id);
 
+  // Join VC
   if (cmd === 'join') {
     if (connection) return message.reply('✅ Already connected.');
     connection = joinVoiceChannel({
@@ -70,6 +71,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
     return message.reply(`🎶 Joined ${vc.name}`);
   }
 
+  // Leave VC & clear queue
   if (cmd === 'leave') {
     if (!connection) return message.reply('❌ Not connected.');
     const guildObj = guildPlayers.get(message.guild.id);
@@ -79,6 +81,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
     return message.reply('👋 Left voice channel and cleared queue.');
   }
 
+  // Play / queue track
   if (cmd === 'play') {
     if (!args.length) return message.reply('🎵 Please provide a track URL or search term.');
     let query = args.join(' ');
@@ -135,6 +138,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
     return playTrack(message, ytUrl, message.author);
   }
 
+  // Search placeholder
   if (cmd === 'search') {
     const query = args.join(' ');
     if (!query) return message.reply('🔍 Provide a search term.');
