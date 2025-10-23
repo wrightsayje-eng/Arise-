@@ -1,7 +1,7 @@
 {
   "name": "dexbot",
-  "version": "0.4.0",
-  "description": "DexBot — Discord bot prototype with SQLite3 and Express web binding",
+  "version": "0.4.1",
+  "description": "DexBot — Discord bot prototype with SQLite3, Express web binding, and command handler",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -13,10 +13,11 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "sqlite3": "^5.1.6",
-    "sqlite": "^4.1.2"
+    "sqlite": "^4.1.2",
+    "chalk": "^5.3.0"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=25.0.0"
   },
   "author": "Dex",
   "license": "MIT"
