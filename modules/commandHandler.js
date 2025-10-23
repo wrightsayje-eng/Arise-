@@ -1,16 +1,16 @@
-// 🎛 commandHandler.js v1.3 Beta — Safe Event Handling + Verbose Logging
-// DexBot — Modular command handler with role-based permission checks
-// Admin-only, Staff-only, DJ-only commands supported
+// 🎛 commandHandler.js v1.4.2 — Modular Command Handler + DeXVyBz Logging
+// DexBot — Safe event handling, role-based permissions, music integration, and action logging
 
 import chalk from 'chalk';
 import { runQuery } from '../data/sqliteDatabase.js';
 
-// Module imports (safe paths)
+// Module imports
 import setupLFSquad from './lfSquad.js';
 import setupChatInteraction from './chatInteraction.js';
 import setupLeveling from './leveling.js';
 import monitorPermAbuse from './antiPermAbuse.js';
-import setupMusicCommands from './commands/musicCommands.js'; // default export
+import setupMusicCommands from './commands/musicCommands.js';
+import setupLogging from './logging.js'; // ✅ DeXVyBz Logging
 
 const PREFIX = '$';
 
@@ -100,11 +100,17 @@ export default function setupCommandHandler(client) {
       { fn: setupLFSquad, name: 'LF$ system' },
       { fn: setupChatInteraction, name: 'Chat Interaction' },
       { fn: setupLeveling, name: 'Leveling' },
-      { fn: monitorPermAbuse, name: 'Anti-Perm Abuse' }
+      { fn: monitorPermAbuse, name: 'Anti-Perm Abuse' },
+      { fn: setupLogging, name: 'DeXVyBz Logging' } // ✅ Integrated logging
     ];
 
     for (const mod of modules) {
       safeExecute(async () => mod.fn(client), mod.name);
     }
+  });
+
+  // ===== CLIENT READY LOG =====
+  client.once('ready', () => {
+    console.log(chalk.black.bgRed(`✅ DeXVyBz Online — Logged in as ${client.user.tag} at ${new Date().toLocaleString()}`));
   });
 }
