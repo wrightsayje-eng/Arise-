@@ -1,4 +1,4 @@
-// 🎵 musicCommands.js v1.4.1 Pro — Multi-Source + Queue + Fallback
+// 🎵 musicCommands.js v1.4.4 Pro — Multi-Source + Queue + Fallback + Interactions
 import {
   joinVoiceChannel,
   getVoiceConnection,
@@ -8,25 +8,16 @@ import {
 } from '@discordjs/voice';
 import ytdl from 'ytdl-core';
 import { EmbedBuilder } from 'discord.js';
-import { getInfo } from 'spotify-url-info';
 import fetch from 'node-fetch';
+// Removed Spotify import due to environment restrictions
 
-const guildPlayers = new Map(); // Map<guildId, { player, queue: [], nowPlaying: string }>
+export const guildPlayers = new Map(); // shared map for all guilds
 
-// Fallback: Spotify / Apple Music URL -> YouTube URL
+// Fallback: Apple Music URL -> YouTube URL
 async function convertToYouTube(query) {
   try {
-    // Spotify track/playlist
-    if (query.includes('spotify.com')) {
-      const info = await getInfo(query);
-      if (info?.videoId) return `https://www.youtube.com/watch?v=${info.videoId}`;
-      // fallback to track name
-      query = info?.name + ' ' + (info?.artists?.map(a => a.name).join(' ') || '');
-    }
-
-    // Apple Music: search via iTunes API
     if (query.includes('music.apple.com')) {
-      const urlParts = query.split('/i/'); // extract track ID
+      const urlParts = query.split('/i/'); 
       if (urlParts[1]) {
         const id = urlParts[1].split('?')[0];
         const res = await fetch(`https://itunes.apple.com/lookup?id=${id}`);
@@ -43,14 +34,14 @@ async function convertToYouTube(query) {
     const text = await ytRes.text();
     const match = text.match(/\/watch\?v=(.{11})/);
     if (match) return `https://www.youtube.com/watch?v=${match[1]}`;
-    return query; // fallback to original
+    return query;
   } catch (e) {
     console.error('[MUSIC] convertToYouTube error:', e);
     return query;
   }
 }
 
-async function setupMusicCommands(cmd, message, args, roles) {
+export default async function setupMusicCommands(cmd, message, args, roles) {
   const { isAdmin, isStaff, isDJ } = roles;
   const authorTag = `<@${message.author.id}>`;
 
@@ -60,7 +51,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
 
   let connection = getVoiceConnection(message.guild.id);
 
-  // Join VC
+  // ================= Join =================
   if (cmd === 'join') {
     if (connection) return message.reply('✅ Already connected.');
     connection = joinVoiceChannel({
@@ -71,7 +62,7 @@ async function setupMusicCommands(cmd, message, args, roles) {
     return message.reply(`🎶 Joined ${vc.name}`);
   }
 
-  // Leave VC & clear queue
+  // ================= Leave =================
   if (cmd === 'leave') {
     if (!connection) return message.reply('❌ Not connected.');
     const guildObj = guildPlayers.get(message.guild.id);
@@ -81,19 +72,17 @@ async function setupMusicCommands(cmd, message, args, roles) {
     return message.reply('👋 Left voice channel and cleared queue.');
   }
 
-  // Play / queue track
+  // ================= Play =================
   if (cmd === 'play') {
     if (!args.length) return message.reply('🎵 Please provide a track URL or search term.');
     let query = args.join(' ');
     let ytUrl = query;
 
-    // Convert Spotify / Apple Music -> YouTube
     if (!ytdl.validateURL(query)) {
       ytUrl = await convertToYouTube(query);
       if (!ytdl.validateURL(ytUrl)) return message.reply('❌ Could not find playable track.');
     }
 
-    // Join if not connected
     if (!connection) {
       connection = joinVoiceChannel({
         channelId: vc.id,
@@ -102,43 +91,39 @@ async function setupMusicCommands(cmd, message, args, roles) {
       });
     }
 
-    // Get / create player
     let guildObj = guildPlayers.get(message.guild.id);
     if (!guildObj) {
       const player = createAudioPlayer();
       connection.subscribe(player);
-      guildObj = { player, queue: [], nowPlaying: null };
+      guildObj = { player, queue: [], nowPlaying: null, repeat: false, nowPlayingMessage: null };
       guildPlayers.set(message.guild.id, guildObj);
 
-      // Auto-play next in queue
       player.on(AudioPlayerStatus.Idle, () => {
         const next = guildObj.queue.shift();
-        if (next) playTrack(message, next, message.author);
+        if (next) playTrack(message, next);
         else guildObj.nowPlaying = null;
       });
 
       player.on('error', err => console.error('[MUSIC] Player error:', err));
     }
 
-    // If already playing, queue
     if (guildObj.nowPlaying) {
       guildObj.queue.push(ytUrl);
       return message.reply(`⏱ Added to queue: ${ytUrl}`);
     }
 
-    // Play track
-    const playTrack = (msg, trackUrl, user) => {
+    function playTrack(msg, trackUrl) {
       const stream = ytdl(trackUrl, { filter: 'audioonly', highWaterMark: 1 << 25 });
       const resource = createAudioResource(stream);
       guildObj.player.play(resource);
       guildObj.nowPlaying = trackUrl;
-      msg.channel.send(`🎧 ${authorTag} Now playing: ${trackUrl}`);
-    };
+      updateNowPlayingMessage(msg, guildObj);
+    }
 
-    return playTrack(message, ytUrl, message.author);
+    playTrack(message, ytUrl);
   }
 
-  // Search placeholder
+  // ================= Search placeholder =================
   if (cmd === 'search') {
     const query = args.join(' ');
     if (!query) return message.reply('🔍 Provide a search term.');
@@ -148,6 +133,36 @@ async function setupMusicCommands(cmd, message, args, roles) {
       .setColor('Purple');
     return message.reply({ embeds: [embed] });
   }
-}
 
-export default setupMusicCommands;
+  // ================= Now Playing Embed Update =================
+  async function updateNowPlayingMessage(messageOrInteraction, guildObj) {
+    const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+
+    const embed = new EmbedBuilder()
+      .setTitle('🎧 Now Playing')
+      .setDescription(guildObj.nowPlaying ? guildObj.nowPlaying : 'Nothing')
+      .addFields({ name: 'Queue', value: guildObj.queue.length ? guildObj.queue.map((t, i) => `${i + 1}. ${t}`).join('\n') : 'Empty' })
+      .setColor('Purple');
+
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('play_pause').setLabel('⏯️ Play/Pause').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('skip').setLabel('⏭️ Skip').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('stop').setLabel('⏹️ Stop').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('repeat').setLabel('🔁 Repeat').setStyle(ButtonStyle.Success)
+    );
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('remove_from_queue')
+        .setPlaceholder('Remove a track from queue...')
+        .addOptions(guildObj.queue.map((t, i) => ({ label: t.slice(0, 80), value: i.toString() })))
+    );
+
+    if (guildObj.nowPlayingMessage) {
+      await guildObj.nowPlayingMessage.edit({ embeds: [embed], components: [buttons, selectMenu] });
+    } else {
+      const channel = messageOrInteraction.channel ?? messageOrInteraction.message?.channel;
+      guildObj.nowPlayingMessage = await channel.send({ embeds: [embed], components: [buttons, selectMenu] });
+    }
+  }
+}
