@@ -1,91 +1,110 @@
-// 🎵 musicCommands.js v1.3 Beta — VC + Audio
-import {
-  joinVoiceChannel,
-  getVoiceConnection,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-} from '@discordjs/voice';
-import ytdl from 'ytdl-core';
-import { EmbedBuilder } from 'discord.js';
+// 🎛 commandHandler.js v1.3 Beta — Safe Event Handling + Verbose Logging
+// DexBot — Modular command handler with role-based permission checks
+// Admin-only, Staff-only, DJ-only commands supported
 
-export default async function setupMusicCommands(cmd, message, args, roles) {
-  const { isAdmin, isStaff, isDJ } = roles;
+import chalk from 'chalk';
+import { runQuery } from '../data/sqliteDatabase.js';
 
-  console.log(`[MUSIC] Command received: ${cmd} by ${message.author.tag}`);
+// Module imports (safe paths)
+import setupLFSquad from './lfSquad.js';
+import setupChatInteraction from './chatInteraction.js';
+import setupLeveling from './leveling.js';
+import monitorPermAbuse from './antiPermAbuse.js';
+import setupMusicCommands from './commands/musicCommands.js'; // default export
 
-  if (!isDJ && !isStaff && !isAdmin) {
-    console.log(`[MUSIC] Permission denied for ${message.author.tag}`);
-    return message.reply('❌ DJ role or higher required.');
-  }
+const PREFIX = '$';
 
-  const vc = message.member.voice.channel;
-  if (!vc) {
-    console.log(`[MUSIC] User not in VC: ${message.author.tag}`);
-    return message.reply('🎧 You need to be in a voice channel.');
-  }
+export default function setupCommandHandler(client) {
+  client.prefix = PREFIX; // attach default prefix to client
 
-  const connection = getVoiceConnection(message.guild.id);
+  // ===== Safe Message Event =====
+  client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
 
-  if (cmd === 'join') {
-    if (connection) {
-      console.log(`[MUSIC] Already connected in ${vc.name}`);
-      return message.reply('✅ Already connected.');
+    const member = message.member;
+    const content = message.content.trim();
+
+    if (!content.startsWith(PREFIX)) return;
+
+    const args = content.slice(PREFIX.length).trim().split(/\s+/);
+    const cmd = args.shift()?.toLowerCase();
+    if (!cmd) return;
+
+    // Determine roles
+    const isAdmin = member.permissions.has('Administrator');
+    const isStaff = member.roles.cache.some(r => r.name.toLowerCase() === 'staff');
+    const isDJ = member.roles.cache.some(r => r.name.toLowerCase() === 'dj');
+
+    // ===== Verbose Logging =====
+    console.log(
+      chalk.cyan(`[COMMAND] ${cmd} triggered by ${member.user.tag} in ${message.guild.name}`)
+    );
+
+    // ===== Command Execution Wrapper =====
+    const safeExecute = async (fn, context = '') => {
+      try {
+        await fn();
+      } catch (err) {
+        console.error(chalk.red(`[COMMAND-HANDLER] Error in ${context}:`), err);
+        message.reply(`⚠️ Oops! Something went wrong while running that command.`);
+      }
+    };
+
+    // ===== ADMIN COMMANDS =====
+    if (cmd === 'reboot') {
+      return safeExecute(async () => {
+        if (!isAdmin) return message.reply('❌ You do not have permission to reboot the bot.');
+        console.log(chalk.yellow(`[ADMIN] Reboot triggered by ${member.user.tag}`));
+        await message.reply('🔄 Rebooting DexVyBz...');
+        process.exit(0);
+      }, 'reboot');
     }
 
-    joinVoiceChannel({
-      channelId: vc.id,
-      guildId: message.guild.id,
-      adapterCreator: vc.guild.voiceAdapterCreator,
-    });
-    console.log(`[MUSIC] Joined VC: ${vc.name}`);
-    return message.reply(`🎶 Joined ${vc.name}`);
-  }
-
-  if (cmd === 'leave') {
-    if (!connection) {
-      console.log(`[MUSIC] Not connected in VC`);
-      return message.reply('❌ Not connected.');
+    if (cmd === 'stats') {
+      return safeExecute(async () => {
+        if (!isAdmin) return message.reply('❌ Admins only.');
+        return message.reply(`📊 DexVyBz Stats — Users: ${message.guild.memberCount}`);
+      }, 'stats');
     }
-    connection.destroy();
-    console.log(`[MUSIC] Left VC: ${vc.name}`);
-    return message.reply('👋 Left voice channel.');
-  }
 
-  if (cmd === 'play') {
-    const query = args.join(' ');
-    if (!query) return message.reply('🎵 Please specify a YouTube URL.');
-    if (!ytdl.validateURL(query)) return message.reply('❌ Only direct YouTube links supported.');
+    // ===== STAFF COMMANDS =====
+    if (cmd === 'vc') {
+      return safeExecute(async () => {
+        if (!isStaff && !isAdmin) return message.reply('❌ Staff only.');
+        console.log(`[STAFF] VC command received by ${member.user.tag}`);
+        return message.reply('🎧 VC command received (placeholder)');
+      }, 'vc');
+    }
 
-    const stream = ytdl(query, { filter: 'audioonly', highWaterMark: 1 << 25 });
-    const resource = createAudioResource(stream);
-    const player = createAudioPlayer();
-    player.play(resource);
+    // ===== DJ/MUSIC COMMANDS =====
+    if (['join', 'leave', 'play', 'search'].includes(cmd)) {
+      return safeExecute(async () => {
+        console.log(
+          `[MUSIC] Command: ${cmd} | User: ${member.user.tag} | Guild: ${message.guild.name}`
+        );
+        setupMusicCommands(cmd, message, args, { isAdmin, isStaff, isDJ });
+      }, `music command: ${cmd}`);
+    }
 
-    const conn = connection || joinVoiceChannel({
-      channelId: vc.id,
-      guildId: message.guild.id,
-      adapterCreator: vc.guild.voiceAdapterCreator,
-    });
+    // ===== GENERAL COMMANDS =====
+    if (cmd === 'help') {
+      return safeExecute(async () => {
+        return message.reply(
+          'Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, $join, $leave, $play, $search, $stats, $reboot'
+        );
+      }, 'help');
+    }
 
-    conn.subscribe(player);
-    console.log(`[MUSIC] Now playing: ${query}`);
-    message.reply(`🎧 Now playing: ${query}`);
+    // ===== Module Handlers (Safe) =====
+    const modules = [
+      { fn: setupLFSquad, name: 'LF$ system' },
+      { fn: setupChatInteraction, name: 'Chat Interaction' },
+      { fn: setupLeveling, name: 'Leveling' },
+      { fn: monitorPermAbuse, name: 'Anti-Perm Abuse' }
+    ];
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      console.log('[MUSIC] Playback finished.');
-      message.channel.send('✅ Playback finished.');
-    });
-  }
-
-  if (cmd === 'search') {
-    const query = args.join(' ');
-    if (!query) return message.reply('🔍 Provide a search term.');
-    const embed = new EmbedBuilder()
-      .setTitle('🔍 DexVyBz Search Result')
-      .setDescription(`Results for **${query}** (feature coming soon...)`)
-      .setColor('Purple');
-    console.log(`[MUSIC] Search requested: ${query}`);
-    return message.reply({ embeds: [embed] });
-  }
+    for (const mod of modules) {
+      safeExecute(async () => mod.fn(client), mod.name);
+    }
+  });
 }
