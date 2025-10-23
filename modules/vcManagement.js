@@ -1,4 +1,4 @@
-// 🎧 vcManagement.js v1.2 Beta
+// 🎧 vcManagement.js v1.3 Beta
 // DexBot — Voice Channel monitoring & rapid join/leave protection
 
 import { getDatabase } from '../data/sqliteDatabase.js';
@@ -23,23 +23,38 @@ export default function vcManagement(client) {
         const timestamp = Date.now();
         const db = await dbPromise;
 
-        // Record join/leave
+        // ------------------------
+        // Record join
+        // ------------------------
         if (!channelIdOld && channelIdNew) {
           await db.run(
             `INSERT INTO vc_activity(userId, channelId, joinedAt, leftAt)
              VALUES (?, ?, ?, NULL)`,
             [userId, channelIdNew, timestamp]
           );
-        } else if (channelIdOld && !channelIdNew) {
-          await db.run(
-            `UPDATE vc_activity SET leftAt = ? 
-             WHERE userId = ? AND leftAt IS NULL
-             ORDER BY joinedAt DESC LIMIT 1`,
-            [timestamp, userId]
-          );
+          console.log(`[VC-MANAGEMENT] ${newState.member.user.tag} joined VC ${channelIdNew}`);
         }
 
-        // Rapid join/leave logic
+        // ------------------------
+        // Record leave (SQLite-safe)
+        // ------------------------
+        else if (channelIdOld && !channelIdNew) {
+          const row = await db.get(
+            'SELECT rowid FROM vc_activity WHERE userId = ? AND leftAt IS NULL ORDER BY joinedAt DESC LIMIT 1',
+            [userId]
+          );
+          if (row) {
+            await db.run(
+              'UPDATE vc_activity SET leftAt = ? WHERE rowid = ?',
+              [timestamp, row.rowid]
+            );
+            console.log(`[VC-MANAGEMENT] ${newState.member.user.tag} left VC ${channelIdOld}`);
+          }
+        }
+
+        // ------------------------
+        // Rapid join/leave detection
+        // ------------------------
         const events = joinLeaveMap.get(userId) || [];
         events.push(timestamp);
         const recent = events.filter(t => timestamp - t <= TIME_WINDOW);
@@ -60,6 +75,7 @@ export default function vcManagement(client) {
             console.error('❌ Failed to lock user:', err);
           }
         }
+
       } catch (err) {
         console.error('[VC-MANAGEMENT] voiceStateUpdate error', err);
       }
