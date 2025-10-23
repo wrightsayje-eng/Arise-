@@ -1,67 +1,94 @@
-// 🎛 antiPermAbuse.js v1.2 Beta
+// 🎛 antiPermAbuse.js v1.3.1 Beta
 import chalk from 'chalk';
 
-const TOGGLE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
-const TOGGLE_THRESHOLD = 6;
-const MONITOR_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const LEAVE_THRESHOLD = 2;           // 2 leaves per user
+const THRESHOLD_WINDOW_MS = 70 * 1000;  // 70 seconds
+const RESET_TIMER_MS = 180 * 1000;      // 180 seconds
+const LOCK_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
-const toggleMap = new Map();
-const monitoredExecutors = new Map();
+// Maps for tracking leaves and locks
+const leaveMap = new Map();  // Map<vcId, Map<userId, Array<timestamps>>>
+const lockedMap = new Map(); // Map<vcId, Map<userId, Timeout>>
 
-export default function monitorPermAbuse(client, db) {
-  try {
-    client.on('voiceStateUpdate', async (oldState, newState) => {
-      try {
-        const target = newState.member ?? oldState?.member;
-        if (!target) return;
-        const guild = target.guild;
+export default function monitorPermAbuse(client) {
+  client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+      const user = newState.member ?? oldState?.member;
+      if (!user || user.user.bot) return;
 
-        const oldMute = oldState?.serverMute ?? false;
-        const newMute = newState?.serverMute ?? false;
-        const oldDeaf = oldState?.serverDeaf ?? false;
-        const newDeaf = newState?.serverDeaf ?? false;
-        if (oldMute === newMute && oldDeaf === newDeaf) return;
+      const vcLeft = oldState.channel && !newState.channel; // user left VC
+      const vcJoined = !oldState.channel && newState.channel; // joined VC
+      const vcMoved = oldState.channel && newState.channel && oldState.channel.id !== newState.channel.id;
 
-        let executorId = null;
-        try {
-          if (guild.members.me?.permissions.has('ViewAuditLog')) {
-            const logs = await guild.fetchAuditLogs({ limit: 6, type: 'MEMBER_UPDATE' });
-            for (const entry of logs.entries.values()) {
-              if (entry.target?.id === target.id) {
-                executorId = entry.executor?.id;
-                break;
-              }
-            }
-          }
-        } catch {}
+      // Skip moves and joins for lock logic
+      if (!vcLeft) return;
 
-        if (!executorId || executorId === client.user.id) return;
+      const vcId = oldState.channel.id;
 
-        const key = `${executorId}:${target.id}`;
-        const now = Date.now();
-        if (!toggleMap.has(key)) toggleMap.set(key, []);
-        toggleMap.get(key).push(now);
-        const arr = toggleMap.get(key).filter(ts => ts >= now - TOGGLE_WINDOW_MS);
-        toggleMap.set(key, arr);
+      // Admin/Staff/DJ exclusions
+      const isExcluded = user.permissions.has('Administrator') ||
+                         user.roles.cache.some(r => ['staff', 'dj'].includes(r.name.toLowerCase()));
+      if (isExcluded) return;
 
-        if (arr.length >= TOGGLE_THRESHOLD && !monitoredExecutors.has(executorId)) {
-          monitoredExecutors.set(executorId, setTimeout(() => monitoredExecutors.delete(executorId), MONITOR_DURATION_MS));
-          console.log(chalk.red(`[ANTI-PERM] Detected abuse by ${executorId} on ${target.id} — monitoring for ${MONITOR_DURATION_MS/60000} min`));
-          try {
-            await db.run(`INSERT INTO infractions (user_id, type, reason, created_at) VALUES (?, ?, ?, ?)`,
-              [executorId, 'perm_abuse', `Excessive mute/deafen toggles on ${target.id}`, now]
-            );
-          } catch (e) {
-            console.error(chalk.red('[ANTI-PERM] Failed to record infraction'), e);
-          }
-        }
-      } catch (err) {
-        console.error(chalk.red('[ANTI-PERM] voiceStateUpdate error'), err);
+      // Init maps
+      if (!leaveMap.has(vcId)) leaveMap.set(vcId, new Map());
+      if (!leaveMap.get(vcId).has(user.id)) leaveMap.get(vcId).set(user.id, []);
+      const userLeaves = leaveMap.get(vcId).get(user.id);
+
+      const now = Date.now();
+      userLeaves.push(now);
+      // Filter out timestamps outside threshold window
+      const recentLeaves = userLeaves.filter(ts => ts >= now - THRESHOLD_WINDOW_MS);
+      leaveMap.get(vcId).set(user.id, recentLeaves);
+
+      if (recentLeaves.length >= LEAVE_THRESHOLD && (!lockedMap.has(vcId) || !lockedMap.get(vcId)?.has(user.id))) {
+        // Lock user
+        if (!lockedMap.has(vcId)) lockedMap.set(vcId, new Map());
+        const timeout = setTimeout(() => {
+          lockedMap.get(vcId).delete(user.id);
+          user.send(`✅ Your temporary VC lock in <#${vcId}> has been lifted.`);
+        }, LOCK_DURATION_MS);
+
+        lockedMap.get(vcId).set(user.id, timeout);
+        console.log(chalk.red(`[ANTI-PERM] Locked ${user.user.tag} from VC ${vcId} for 1 hour due to rapid leaves.`));
+        user.send(`⛔ You have been temporarily locked from VC <#${vcId}> for 1 hour due to rapid leaves.`);
+
+        // Reset leave tracker after locking
+        leaveMap.get(vcId).set(user.id, []);
       }
-    });
 
-    console.log('✅ AntiPermAbuse module loaded');
-  } catch (err) {
-    console.error('❌ Failed to load AntiPermAbuse module', err);
-  }
+      // Clear old leaves after reset timer
+      setTimeout(() => {
+        if (leaveMap.get(vcId)?.has(user.id)) leaveMap.get(vcId).set(user.id, []);
+      }, RESET_TIMER_MS);
+
+    } catch (err) {
+      console.error(chalk.red('[ANTI-PERM] voiceStateUpdate error'), err);
+    }
+  });
+
+  // ================= $clearlocks command =================
+  client.on('messageCreate', async (message) => {
+    if (!message.content.toLowerCase().startsWith('$clearlocks')) return;
+    const member = message.member;
+    const vcId = member.voice.channel?.id;
+    if (!vcId) return message.reply('❌ You must be in a VC to clear locks.');
+
+    const isAdminOrStaff = member.permissions.has('Administrator') ||
+                           member.roles.cache.some(r => ['staff', 'dj'].includes(r.name.toLowerCase()));
+    if (!isAdminOrStaff) return message.reply('❌ Admin/Staff only.');
+
+    if (lockedMap.has(vcId)) {
+      for (const [userId, timeout] of lockedMap.get(vcId)) {
+        clearTimeout(timeout);
+      }
+      lockedMap.set(vcId, new Map());
+      leaveMap.set(vcId, new Map());
+    }
+
+    message.reply(`✅ All locks cleared and timers reset for VC <#${vcId}>.`);
+    console.log(chalk.green(`[ANTI-PERM] $clearlocks executed in VC ${vcId} by ${member.user.tag}`));
+  });
+
+  console.log('✅ AntiPermAbuse module v1.3.1 loaded');
 }
