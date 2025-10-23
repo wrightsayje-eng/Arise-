@@ -1,4 +1,4 @@
-// 🎛 commandHandler.js v1.1 Beta — Safe Event Handling
+// 🎛 commandHandler.js v1.2 Beta — Safe Event Handling + Music Support
 // DexBot — Modular command handler with role-based permission checks
 // Admin-only, Staff-only, DJ-only commands supported
 
@@ -10,11 +10,11 @@ import setupLFSquad from './lfSquad.js';
 import setupChatInteraction from './chatInteraction.js';
 import setupLeveling from './leveling.js';
 import monitorPermAbuse from './antiPermAbuse.js';
-import setupMusicCommands from './commands/musicCommands.js'; // ✅ Corrected path
+import setupMusicCommands from './commands/musicCommands.js';
 
 const PREFIX = '$';
 
-export default function setupCommandHandler(client) {
+export default function setupCommandHandler(client, db) {
   client.prefix = PREFIX; // attach default prefix to client
 
   // ===== Safe Message Event =====
@@ -76,7 +76,17 @@ export default function setupCommandHandler(client) {
         if (!isDJ && !isStaff && !isAdmin) {
           return message.reply('❌ DJ role required for music commands.');
         }
-        setupMusicCommands(client, cmd, args, message);
+
+        // Attempt to load ytdl-core dynamically
+        let ytdl;
+        try {
+          ytdl = await import('ytdl-core');
+        } catch {
+          return message.reply('❌ Music commands unavailable — ytdl-core not installed.');
+        }
+
+        console.log(chalk.cyan(`[MUSIC] Command: ${cmd} | User: ${message.author.tag}`));
+        setupMusicCommands(client, cmd, args, message, ytdl);
       }, `music command: ${cmd}`);
     }
 
@@ -98,7 +108,7 @@ export default function setupCommandHandler(client) {
     ];
 
     for (const mod of modules) {
-      safeExecute(async () => mod.fn(client), mod.name);
+      safeExecute(async () => mod.fn(client, db), mod.name);
     }
   });
 }
