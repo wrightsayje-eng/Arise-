@@ -1,6 +1,4 @@
-// 💾 sqliteDatabase.js v0.3
-// DexBot persistent data layer — pure sqlite3 implementation with guaranteed async initialization.
-
+// 💾 sqliteDatabase.js v0.4
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
@@ -13,11 +11,6 @@ const __dirname = path.dirname(__filename);
 
 let dbPromise; // Promise to ensure single async initialization
 
-/**
- * Initialize the DexBot SQLite database.
- * Creates necessary tables if they don't exist.
- * Returns a ready-to-use database instance.
- */
 export function initDatabase() {
   if (dbPromise) return dbPromise;
 
@@ -31,12 +24,14 @@ export function initDatabase() {
 
     console.log('✅ DexBot SQLite database initialized at', dbPath);
 
-    // Core table setup — add more tables here as needed
+    // Core table setup
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT,
-        joinedAt INTEGER
+        joinedAt INTEGER,
+        xp INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS vc_activity (
@@ -53,6 +48,10 @@ export function initDatabase() {
         details TEXT,
         timestamp INTEGER
       );
+
+      CREATE TABLE IF NOT EXISTS whitelist (
+        user_id TEXT PRIMARY KEY
+      );
     `);
 
     return db;
@@ -61,10 +60,6 @@ export function initDatabase() {
   return dbPromise;
 }
 
-/**
- * Get the initialized database instance.
- * Throws an error if initDatabase() hasn't been called yet.
- */
 export async function getDatabase() {
   if (!dbPromise) {
     throw new Error('❌ Database not initialized — call initDatabase() first.');
@@ -72,10 +67,6 @@ export async function getDatabase() {
   return dbPromise;
 }
 
-/**
- * Run a query on the DexBot database.
- * Returns an array of results.
- */
 export async function runQuery(sql, params = []) {
   const db = await getDatabase();
   return db.all(sql, params);
