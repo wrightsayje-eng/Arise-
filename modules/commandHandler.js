@@ -1,15 +1,15 @@
-// 🎛 commandHandler.js v1.6 — Stable Integrated Command System
+// 🎛 commandHandler.js v1.7 — Stable Command System
 import chalk from 'chalk';
 import { getDatabase } from '../data/sqliteDatabase.js';
 
-// Core Modules (initialized once)
+// Core Modules
 import setupLFSquad from './lfSquad.js';
 import setupChatInteraction from './chatInteraction.js';
 import setupLeveling from './leveling.js';
 import monitorPermAbuse from './antiPermAbuse.js';
-import setupMusicCommands from './musicCommands.js';
 import setupLogging from './logging.js';
 import setupScanLinks from './scanLinks.js';
+import setupMusicPro from './musicCommands.js'; // Only loaded once here
 
 const PREFIX = '$';
 
@@ -18,7 +18,7 @@ export default async function setupCommandHandler(client) {
 
   console.log(chalk.cyanBright('\n🧠 Initializing core modules...'));
 
-  // 🔒 Initialize persistent modules ONCE, not per message
+  // Persistent modules
   const initModules = [
     { fn: setupLFSquad, name: 'LF$ system' },
     { fn: setupChatInteraction, name: 'Chat Interaction' },
@@ -26,6 +26,7 @@ export default async function setupCommandHandler(client) {
     { fn: monitorPermAbuse, name: 'Anti-Perm Abuse' },
     { fn: setupLogging, name: 'DeXVyBz Logging' },
     { fn: setupScanLinks, name: 'Scan Links' },
+    { fn: setupMusicPro, name: 'Music Pro' },
   ];
 
   for (const mod of initModules) {
@@ -37,32 +38,30 @@ export default async function setupCommandHandler(client) {
     }
   }
 
-  // 🎧 Handle commands
+  // Safe command execution helper
+  const safeExecute = async (fn, context = '') => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(chalk.red(`[COMMAND-HANDLER] Error in ${context}:`), err);
+    }
+  };
+
+  // Command Listener (non-music)
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    if (!message.content.startsWith(PREFIX)) return;
 
-    const member = message.member;
-    const content = message.content.trim();
-    if (!content.startsWith(PREFIX)) return;
-
-    const args = content.slice(PREFIX.length).trim().split(/\s+/);
+    const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = args.shift()?.toLowerCase();
     if (!cmd) return;
 
+    const member = message.member;
     const isAdmin = member.permissions.has('Administrator');
     const isOwner = member.id === client.application?.owner?.id;
     const isStaff = member.roles.cache.some(r => r.name.toLowerCase() === 'staff');
-    const isDJ = member.roles.cache.some(r => r.name.toLowerCase() === 'dj');
 
     console.log(chalk.cyan(`[COMMAND] ${cmd} by ${member.user.tag} in ${message.guild.name}`));
-
-    const safeExecute = async (fn, context = '') => {
-      try { await fn(); } 
-      catch (err) { 
-        console.error(chalk.red(`[COMMAND-HANDLER] Error in ${context}:`), err);
-        message.reply('⚠️ Oops! Something went wrong running that command.');
-      }
-    };
 
     const db = await getDatabase();
 
@@ -133,28 +132,25 @@ export default async function setupCommandHandler(client) {
       }, `staff command: ${cmd}`);
     }
 
-    // ----- DJ / MUSIC COMMANDS -----
-    if (['join','leave','play','search'].includes(cmd)) {
-      return safeExecute(async () => {
-        await setupMusicCommands(cmd, message, args, { isAdmin, isStaff, isDJ });
-      }, `music command: ${cmd}`);
-    }
-
     // ----- GENERAL COMMANDS -----
     if (cmd === 'help') {
       return safeExecute(async () => {
         return message.reply(
           'Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, ' +
-          '$join, $leave, $play, $search, $stats, $reboot, $botstatus, $whitelist, $vc, $status, $scan'
+          '$stats, $reboot, $botstatus, $whitelist, $vc, $status, $scan'
         );
       }, 'help');
     }
+
+    // ----- MUSIC COMMANDS -----
+    // Delegate everything to musicCommands.js, which is already listening for messageCreate
+    // So we just ignore music commands here to prevent duplicates
+    if (['join','leave','play','search'].includes(cmd)) return;
   });
 
-  // 🟢 Ready Event (v14 syntax)
   client.once('ready', () => {
     console.log(chalk.black.bgRed(
-      `✅ DeXVyBz Online — Logged in as ${client.user.tag} [commandHandler v1.6 @ ${new Date().toLocaleString()}]`
+      `✅ DeXVyBz Online — Logged in as ${client.user.tag} [commandHandler v1.7 @ ${new Date().toLocaleString()}]`
     ));
   });
 }
