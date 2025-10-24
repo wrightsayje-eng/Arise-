@@ -134,7 +134,7 @@ export default function setupCommandHandler(client) {
     }
   });
 
-  client.once('ready', () => {
+  client.once('clientReady', () => {
     console.log(chalk.black.bgRed(`✅ DeXVyBz Online — Logged in as ${client.user.tag} at ${new Date().toLocaleString()}`));
   });
 }
