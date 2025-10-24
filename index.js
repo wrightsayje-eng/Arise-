@@ -1,4 +1,4 @@
-// 🟢 index.js v1.7 — DexVyBz with fixed ready event & DB
+// 🟢 index.js v1.7.1 — DexVyBz v15-ready with clientReady & full DB support
 import { Client, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from './data/sqliteDatabase.js';
 import dotenv from 'dotenv';
@@ -25,8 +25,8 @@ client.setMaxListeners(20);
 // ===== Minimal Web Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req,res)=>res.send('🌐 DexVyBz v1.7 Beta online ✅'));
-app.listen(PORT, ()=>console.log(`🌐 Web server running on port ${PORT}`));
+app.get('/', (req,res) => res.send('🌐 DexVyBz v1.7.1 Beta online ✅'));
+app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
 // ===== Verbose Logging =====
 client.on('messageCreate', message => {
@@ -52,7 +52,7 @@ async function loadModuleSafe(path, client, db) {
 }
 
 // ===== Global unhandled rejection handler =====
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   console.error(chalk.red('⚠️ Unhandled Rejection:'), reason);
 });
 
@@ -65,6 +65,9 @@ process.on('unhandledRejection', (reason, promise) => {
     client.once('ready', async () => {
       await client.application?.fetch(); 
       console.log(chalk.green(`✅ DexVyBz online as ${client.user.tag}`));
+
+      // Emit custom ready event for v15 module loading
+      client.emit('clientReady');
 
       // ===== Load all modules safely =====
       await loadModuleSafe('./modules/commandHandler.js', client, db);
