@@ -1,42 +1,28 @@
-// 🔗 scanLinks.js v1.3 Patched
+// 🔗 scanLinks.js v1.3 Pro — Detect & Handle Malicious Links
 import { EmbedBuilder, Colors } from 'discord.js';
-import { getDatabase } from '../data/sqliteDatabase.js';
 
 export default async function scanLinks(client) {
-  const db = await getDatabase();
+  const suspiciousDomains = ['badlink.com', 'malware.io', 'phishing.net'];
 
   client.on('messageCreate', async (message) => {
+    if (!message.guild || message.author.bot) return;
+
     try {
-      if (message.author.bot || !message.guild) return;
-
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const matches = message.content.match(urlRegex);
-      if (!matches) return;
-
-      const safeLinks = [];
-      const blockedLinks = [];
-
-      for (const link of matches) {
-        const row = await db.get('SELECT * FROM blocked_links WHERE url = ?', [link]);
-        if (row) blockedLinks.push(link);
-        else safeLinks.push(link);
-      }
-
-      if (blockedLinks.length) {
-        await message.delete().catch(() => null);
+      const found = suspiciousDomains.find(domain => message.content.includes(domain));
+      if (found) {
+        await message.delete().catch(console.error);
         const embed = new EmbedBuilder()
-          .setTitle('🚫 Blocked Link Detected')
+          .setTitle('⚠️ Suspicious Link Detected')
+          .setDescription(`User: ${message.author.tag}\nLink: ${found}`)
           .setColor(Colors.Red)
-          .setDescription(`Blocked: ${blockedLinks.join('\n')}`)
-          .setFooter({ text: `User: ${message.author.tag} | ID: ${message.author.id}` });
-
-        message.channel.send({ embeds: [embed] }).catch(() => null);
-        console.log(`[SCANLINKS] Deleted blocked links from ${message.author.tag}: ${blockedLinks.join(', ')}`);
+          .setTimestamp();
+        const modChannel = await client.channels.fetch('1358627364132884690').catch(() => null);
+        if (modChannel) await modChannel.send({ embeds: [embed] });
       }
     } catch (err) {
-      console.error('[SCANLINKS] Error processing messageCreate:', err);
+      console.error('[SCAN LINKS] Error processing message:', err);
     }
   });
 
-  console.log('✅ Link scanning module loaded (v1.3 Patched)');
+  console.log('✅ Link Scanner Module active (v1.3 Pro)');
 }
