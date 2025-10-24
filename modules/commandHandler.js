@@ -1,115 +1,139 @@
-// 🎛 commandHandler.js v1.4.2 — Modular Command Handler + DeXVyBz Logging
-// DexBot — Safe event handling, role-based permissions, music integration, and action logging
-
+// 🎛 commandHandler.js v1.5 — Integrated Admin/Staff/Music/Scan Commands
 import chalk from 'chalk';
-import { runQuery } from '../data/sqliteDatabase.js';
+import { getDatabase } from '../data/sqliteDatabase.js';
 
-// Module imports
 import setupLFSquad from './lfSquad.js';
 import setupChatInteraction from './chatInteraction.js';
 import setupLeveling from './leveling.js';
 import monitorPermAbuse from './antiPermAbuse.js';
-import setupMusicCommands from './commands/musicCommands.js';
-import setupLogging from './logging.js'; // ✅ DeXVyBz Logging
+import setupMusicCommands from './musicCommands.js';
+import setupLogging from './logging.js';
+import setupScanLinks from './scanLinks.js';
 
 const PREFIX = '$';
 
 export default function setupCommandHandler(client) {
-  client.prefix = PREFIX; // attach default prefix to client
+  client.prefix = PREFIX;
 
-  // ===== Safe Message Event =====
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-
     const member = message.member;
     const content = message.content.trim();
-
     if (!content.startsWith(PREFIX)) return;
 
     const args = content.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = args.shift()?.toLowerCase();
     if (!cmd) return;
 
-    // Determine roles
     const isAdmin = member.permissions.has('Administrator');
+    const isOwner = member.id === client.application?.owner?.id;
     const isStaff = member.roles.cache.some(r => r.name.toLowerCase() === 'staff');
     const isDJ = member.roles.cache.some(r => r.name.toLowerCase() === 'dj');
 
-    // ===== Verbose Logging =====
-    console.log(
-      chalk.cyan(`[COMMAND] ${cmd} triggered by ${member.user.tag} in ${message.guild.name}`)
-    );
+    console.log(chalk.cyan(`[COMMAND] ${cmd} by ${member.user.tag} in ${message.guild.name}`));
 
-    // ===== Command Execution Wrapper =====
-    const safeExecute = async (fn, context = '') => {
-      try {
-        await fn();
-      } catch (err) {
+    const safeExecute = async (fn, context='') => {
+      try { await fn(); } 
+      catch (err) { 
         console.error(chalk.red(`[COMMAND-HANDLER] Error in ${context}:`), err);
-        message.reply(`⚠️ Oops! Something went wrong while running that command.`);
+        message.reply('⚠️ Oops! Something went wrong running that command.');
       }
     };
 
-    // ===== ADMIN COMMANDS =====
-    if (cmd === 'reboot') {
+    const db = await getDatabase();
+
+    // ----- ADMIN / OWNER COMMANDS -----
+    if (['reboot','stats','botstatus','whitelist'].includes(cmd)) {
       return safeExecute(async () => {
-        if (!isAdmin) return message.reply('❌ You do not have permission to reboot the bot.');
-        console.log(chalk.yellow(`[ADMIN] Reboot triggered by ${member.user.tag}`));
-        await message.reply('🔄 Rebooting DexVyBz...');
-        process.exit(0);
-      }, 'reboot');
+        if (!isAdmin && !isOwner) return message.reply('❌ Admin/Owner only.');
+
+        if (cmd === 'reboot') {
+          console.log(chalk.yellow(`[ADMIN] Reboot by ${member.user.tag}`));
+          await message.reply('🔄 Rebooting DexVyBz...');
+          process.exit(0);
+        }
+
+        if (cmd === 'stats') {
+          const uptime = process.uptime();
+          const mem = process.memoryUsage().rss / 1024 / 1024;
+          return message.reply(
+            `📊 DexVyBz Stats — Users: ${message.guild.memberCount}, Uptime: ${Math.round(uptime/60)}m, RAM: ${mem.toFixed(1)} MB`
+          );
+        }
+
+        if (cmd === 'botstatus') {
+          const status = args.join(' ').slice(0,128);
+          if (!status) return message.reply('❌ Provide a status message.');
+          await client.user.setPresence({ activities:[{ name:status, type:0 }] });
+          return message.reply(`✅ Bot status updated: ${status}`);
+        }
+
+        if (cmd === 'whitelist') {
+          const modules = ['scan','music','vc','rapidleave'];
+          const moduleArg = args.shift()?.toLowerCase();
+          if (!modules.includes(moduleArg)) return message.reply(`❌ Choose module: ${modules.join(', ')}`);
+
+          const mention = message.mentions.members.first() || args[0];
+          if (!mention) return message.reply('❌ Mention a user to whitelist.');
+          const userId = typeof mention === 'string' ? mention.replace(/\D/g,'') : mention.id;
+
+          await db.run('INSERT OR REPLACE INTO whitelist(user_id,module) VALUES (?,?)',[userId,moduleArg]);
+          return message.reply(`✅ User <@${userId}> whitelisted for **${moduleArg}** module.`);
+        }
+      }, `admin command: ${cmd}`);
     }
 
-    if (cmd === 'stats') {
+    // ----- STAFF COMMANDS -----
+    if (['vc','status'].includes(cmd)) {
       return safeExecute(async () => {
-        if (!isAdmin) return message.reply('❌ Admins only.');
-        return message.reply(`📊 DexVyBz Stats — Users: ${message.guild.memberCount}`);
-      }, 'stats');
+        if (!isAdmin && !isStaff) return message.reply('❌ Staff only.');
+
+        if (cmd === 'vc') {
+          const vcs = message.guild.channels.cache
+            .filter(ch => ch.isVoiceBased())
+            .map(ch => `${ch.name} — ${ch.members.size} users`);
+          return message.reply(`🎧 **Active VCs:**\n${vcs.join('\n') || 'None active'}`);
+        }
+
+        if (cmd === 'status') {
+          const status = args.join(' ').slice(0,128);
+          if (!status) return message.reply('❌ Provide a VC status message.');
+          if (!message.channel.isVoiceBased()) return message.reply('❌ Must be in a VC channel.');
+          await message.channel.setTopic(status).catch(() => null);
+          return message.reply(`✅ VC status updated: ${status}`);
+        }
+      }, `staff command: ${cmd}`);
     }
 
-    // ===== STAFF COMMANDS =====
-    if (cmd === 'vc') {
+    // ----- DJ / MUSIC COMMANDS -----
+    if (['join','leave','play','search'].includes(cmd)) {
       return safeExecute(async () => {
-        if (!isStaff && !isAdmin) return message.reply('❌ Staff only.');
-        console.log(`[STAFF] VC command received by ${member.user.tag}`);
-        return message.reply('🎧 VC command received (placeholder)');
-      }, 'vc');
-    }
-
-    // ===== DJ/MUSIC COMMANDS =====
-    if (['join', 'leave', 'play', 'search'].includes(cmd)) {
-      return safeExecute(async () => {
-        console.log(
-          `[MUSIC] Command: ${cmd} | User: ${member.user.tag} | Guild: ${message.guild.name}`
-        );
-        setupMusicCommands(cmd, message, args, { isAdmin, isStaff, isDJ });
+        setupMusicCommands(cmd,message,args,{isAdmin,isStaff,isDJ});
       }, `music command: ${cmd}`);
     }
 
-    // ===== GENERAL COMMANDS =====
+    // ----- GENERAL COMMANDS -----
     if (cmd === 'help') {
       return safeExecute(async () => {
-        return message.reply(
-          'Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, $join, $leave, $play, $search, $stats, $reboot'
-        );
+        return message.reply('Commands: $help, $afk <reason>, $removeafk, $lf <game>, $lfon, $lfoff, $join, $leave, $play, $search, $stats, $reboot, $botstatus, $whitelist, $vc, $status, $scan');
       }, 'help');
     }
 
-    // ===== Module Handlers (Safe) =====
+    // ----- MODULE HANDLERS -----
     const modules = [
-      { fn: setupLFSquad, name: 'LF$ system' },
-      { fn: setupChatInteraction, name: 'Chat Interaction' },
-      { fn: setupLeveling, name: 'Leveling' },
-      { fn: monitorPermAbuse, name: 'Anti-Perm Abuse' },
-      { fn: setupLogging, name: 'DeXVyBz Logging' } // ✅ Integrated logging
+      { fn: setupLFSquad, name:'LF$ system' },
+      { fn: setupChatInteraction, name:'Chat Interaction' },
+      { fn: setupLeveling, name:'Leveling' },
+      { fn: monitorPermAbuse, name:'Anti-Perm Abuse' },
+      { fn: setupLogging, name:'DeXVyBz Logging' },
+      { fn: setupScanLinks, name:'Scan Links' } 
     ];
 
     for (const mod of modules) {
-      safeExecute(async () => mod.fn(client), mod.name);
+      safeExecute(async ()=>mod.fn(client), mod.name);
     }
   });
 
-  // ===== CLIENT READY LOG =====
   client.once('ready', () => {
     console.log(chalk.black.bgRed(`✅ DeXVyBz Online — Logged in as ${client.user.tag} at ${new Date().toLocaleString()}`));
   });
