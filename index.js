@@ -1,4 +1,4 @@
-// 🟢 index.js v1.6 — Deployable DexVyBz with fixed ready event
+// 🟢 index.js v1.7 — DexVyBz with fixed ready event & DB
 import { Client, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from './data/sqliteDatabase.js';
 import dotenv from 'dotenv';
@@ -19,10 +19,13 @@ const client = new Client({
   partials: ['CHANNEL', 'GUILD_MEMBER', 'MESSAGE'],
 });
 
+// Increase max listeners to prevent warnings
+client.setMaxListeners(20);
+
 // ===== Minimal Web Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req,res)=>res.send('🌐 DexVyBz v1.6 Beta online ✅'));
+app.get('/', (req,res)=>res.send('🌐 DexVyBz v1.7 Beta online ✅'));
 app.listen(PORT, ()=>console.log(`🌐 Web server running on port ${PORT}`));
 
 // ===== Verbose Logging =====
@@ -59,8 +62,7 @@ process.on('unhandledRejection', (reason, promise) => {
     const db = await initDatabase();
     console.log(chalk.yellow('✅ Database initialized successfully'));
 
-    // ===== Client Ready =====
-    client.once('ready', async () => { // <-- fixed event
+    client.once('ready', async () => {
       await client.application?.fetch(); 
       console.log(chalk.green(`✅ DexVyBz online as ${client.user.tag}`));
 
