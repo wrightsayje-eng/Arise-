@@ -1,4 +1,3 @@
-// 🟢 index.js v1.4 — Deployable DexVyBz v1.5
 import { Client, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from './data/sqliteDatabase.js';
 import dotenv from 'dotenv';
@@ -15,52 +14,50 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
-  partials: ['CHANNEL', 'GUILD_MEMBER', 'MESSAGE'],
+  partials: ['CHANNEL','GUILD_MEMBER','MESSAGE'],
 });
 
 // ===== Minimal Web Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('🌐 DexVyBz v1.5 Beta online ✅'));
-app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
+app.get('/', (req,res)=>res.send('🌐 DexVyBz v1.5 Beta online ✅'));
+app.listen(PORT, ()=>console.log(`🌐 Web server running on port ${PORT}`));
 
 // ===== Verbose Logging =====
-client.on('messageCreate', message => {
+client.on('messageCreate', message=>{
   if (!message.author.bot)
     console.log(chalk.blue(`[MSG] ${message.author.tag}: ${message.content}`));
 });
 
-client.on('voiceStateUpdate', (oldState, newState) => {
+client.on('voiceStateUpdate',(oldState,newState)=>{
   const oldChannel = oldState.channelId || 'None';
   const newChannel = newState.channelId || 'None';
   console.log(chalk.green(`[VC] ${newState.id} moved from ${oldChannel} -> ${newChannel}`));
 });
 
 // ===== Safe Module Loader =====
-async function loadModuleSafe(path, client, db) {
-  try {
+async function loadModuleSafe(path, client, db){
+  try{
     const mod = await import(path);
-    if (mod.default) {
-      await mod.default(client, db);
-      console.log(chalk.yellow(`✅ Loaded module: ${path}`));
-    }
-  } catch (err) {
+    if (mod.default) await mod.default(client, db);
+    console.log(chalk.yellow(`✅ Loaded module: ${path}`));
+  }catch(err){
     console.error(chalk.red(`❌ Failed to load module: ${path}`), err);
   }
 }
 
 // ===== Global unhandled rejection handler =====
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection',(reason,promise)=>{
   console.error(chalk.red('⚠️ Unhandled Rejection:'), reason);
 });
 
 // ===== Bot Startup =====
-(async () => {
-  try {
+(async ()=>{
+  try{
     const db = await initDatabase();
     console.log(chalk.yellow('✅ Database initialized successfully'));
 
-    client.once('ready', async () => {
+    client.once('clientReady', async ()=>{
       await client.application?.fetch(); // ensures owner detection works
       console.log(chalk.green(`✅ DexVyBz online as ${client.user.tag}`));
 
@@ -69,16 +66,4 @@ process.on('unhandledRejection', (reason, promise) => {
       await loadModuleSafe('./modules/lfSquad.js', client, db);
       await loadModuleSafe('./modules/chatInteraction.js', client, db);
       await loadModuleSafe('./modules/leveling.js', client, db);
-      await loadModuleSafe('./modules/antiPermAbuse.js', client, db);
-      await loadModuleSafe('./modules/musicCommands.js', client, db);
-      await loadModuleSafe('./modules/logging.js', client, db);
-
-      console.log(chalk.green('✅ All modules loaded successfully'));
-    });
-
-    await client.login(process.env.DISCORD_TOKEN);
-  } catch (err) {
-    console.error(chalk.red('❌ Critical error initializing DexVyBz:'), err);
-    process.exit(1);
-  }
-})();
+      await
