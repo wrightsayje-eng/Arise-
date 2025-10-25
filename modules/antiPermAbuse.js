@@ -1,4 +1,4 @@
-// 🛡️ AntiPermAbuse Module v1.4.4 Pro – DexVyBz Full Action Feedback Patch
+// 🛡️ AntiPermAbuse Module v1.5.0 — DexVyBz Full Action & Clear Command Support
 import chalk from 'chalk';
 
 const leaveTracker = new Map();
@@ -10,7 +10,7 @@ const TIME_WINDOW = 70 * 1000;          // 70s to trigger
 const LOCK_DURATION = 60 * 60 * 1000;   // 1h lock
 const RESET_TIME = 180 * 1000;          // reset window
 
-export default async function antiPermAbuse(client) {
+async function antiPermAbuse(client) {
   client.on('voiceStateUpdate', async (oldState, newState) => {
     const user = newState.member;
     if (!user || user.user.bot) return;
@@ -68,7 +68,7 @@ export default async function antiPermAbuse(client) {
             }
           }, LOCK_DURATION);
 
-          lockTimers.set(userId, unlockTimer);
+          lockTimers.set(userId, { timer: unlockTimer, channel: leftChannel });
         } catch (err) {
           console.error(chalk.red(`[ANTI-PERM] Lock failed for ${user.user.username}:`), err);
           if (textChannel) {
@@ -79,28 +79,33 @@ export default async function antiPermAbuse(client) {
         leaveTracker.delete(userId);
       }
 
-      // Auto clear tracker
+      // Auto clear tracker after reset time
       setTimeout(() => leaveTracker.delete(userId), RESET_TIME);
     }
   });
 }
 
-// === Clear all locks & timers ===
-export function clearAllLocks(client, channel) {
-  let clearedCount = 0;
+// === CLEAR FUNCTION FOR $clear COMMAND ===
+antiPermAbuse.clearAllLocks = async (client, feedbackChannel) => {
+  let cleared = 0;
 
-  for (const [userId, timer] of lockTimers.entries()) {
-    clearTimeout(timer);
-    lockTimers.delete(userId);
-    clearedCount++;
+  for (const [userId, lockInfo] of lockTimers.entries()) {
+    clearTimeout(lockInfo.timer);
+    try {
+      await lockInfo.channel.permissionOverwrites.delete(userId);
+      console.log(chalk.green(`[ANTI-PERM] Cleared lock for user ${userId}`));
+      cleared++;
+    } catch (err) {
+      console.error(chalk.red(`[ANTI-PERM] Failed to clear lock for user ${userId}:`), err);
+    }
   }
 
   leaveTracker.clear();
+  lockTimers.clear();
 
-  if (channel) {
-    channel.send(`✅ All anti-perm abuse locks and timers have been reset. (${clearedCount} locks cleared)`)
-      .catch(err => console.error(`[ANTI-PERM] Failed to send reset confirmation:`, err));
+  if (feedbackChannel) {
+    await feedbackChannel.send(`✅ All anti-perm abuse locks and timers have been reset. (Total cleared: ${cleared})`);
   }
+};
 
-  console.log(chalk.yellow(`[ANTI-PERM] Cleared all locks and timers. Total cleared: ${clearedCount}`));
-}
+export default antiPermAbuse;
