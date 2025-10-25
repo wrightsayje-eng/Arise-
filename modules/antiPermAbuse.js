@@ -1,4 +1,4 @@
-// 🛡️ AntiPermAbuse Module v1.5.0 — DexVyBz Full Action & Clear Command Support
+// 🛡️ AntiPermAbuse Module v1.5.0 — DexVyBz Pro Lock & Logging Patch
 import chalk from 'chalk';
 
 const leaveTracker = new Map();
@@ -9,8 +9,31 @@ const LEAVE_THRESHOLD = 2;
 const TIME_WINDOW = 70 * 1000;          // 70s to trigger
 const LOCK_DURATION = 60 * 60 * 1000;   // 1h lock
 const RESET_TIME = 180 * 1000;          // reset window
+const ADMIN_CHANNEL_ID = '1342342913773932703'; // Hardcoded lockout message channel
 
-async function antiPermAbuse(client) {
+export default async function antiPermAbuse(client) {
+
+  // === Helper to clear all locks (for $clear command) ===
+  client.antiPermClearAllLocks = async function () {
+    for (const [userId, timer] of lockTimers.entries()) {
+      clearTimeout(timer);
+      lockTimers.delete(userId);
+      try {
+        const guilds = client.guilds.cache;
+        for (const guild of guilds.values()) {
+          for (const channel of guild.channels.cache.values()) {
+            if (channel.isVoiceBased()) {
+              const perms = channel.permissionOverwrites.cache.get(userId);
+              if (perms) await channel.permissionOverwrites.delete(userId);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(chalk.red(`[ANTI-PERM] Failed to clear lock for ${userId}:`), err);
+      }
+    }
+  };
+
   client.on('voiceStateUpdate', async (oldState, newState) => {
     const user = newState.member;
     if (!user || user.user.bot) return;
@@ -24,21 +47,16 @@ async function antiPermAbuse(client) {
       if (!leaveTracker.has(userId)) leaveTracker.set(userId, []);
       const leaves = leaveTracker.get(userId);
 
-      // Track leaves in the window
       leaves.push(now);
       const recent = leaves.filter(ts => now - ts < TIME_WINDOW);
       leaveTracker.set(userId, recent);
 
       console.log(chalk.yellow(`[ANTI-PERM] ${user.user.username} left VC ${leftChannel.id} (count: ${recent.length})`));
 
-      // === Trigger threshold ===
       if (recent.length >= LEAVE_THRESHOLD) {
         console.log(chalk.red(`[ANTI-PERM] Locking ${user.user.username} from VC ${leftChannel.id} for 1 hour due to rapid leaves.`));
 
-        // Find text channel for feedback
-        const textChannel =
-          leftChannel.guild.systemChannel ||
-          leftChannel.guild.channels.cache.find(c => c.isTextBased() && c.permissionsFor(client.user)?.has('SendMessages'));
+        const textChannel = leftChannel.guild.channels.cache.get(ADMIN_CHANNEL_ID);
 
         try {
           await leftChannel.permissionOverwrites.edit(user.id, { Connect: false });
@@ -68,7 +86,7 @@ async function antiPermAbuse(client) {
             }
           }, LOCK_DURATION);
 
-          lockTimers.set(userId, { timer: unlockTimer, channel: leftChannel });
+          lockTimers.set(userId, unlockTimer);
         } catch (err) {
           console.error(chalk.red(`[ANTI-PERM] Lock failed for ${user.user.username}:`), err);
           if (textChannel) {
@@ -79,33 +97,7 @@ async function antiPermAbuse(client) {
         leaveTracker.delete(userId);
       }
 
-      // Auto clear tracker after reset time
       setTimeout(() => leaveTracker.delete(userId), RESET_TIME);
     }
   });
 }
-
-// === CLEAR FUNCTION FOR $clear COMMAND ===
-antiPermAbuse.clearAllLocks = async (client, feedbackChannel) => {
-  let cleared = 0;
-
-  for (const [userId, lockInfo] of lockTimers.entries()) {
-    clearTimeout(lockInfo.timer);
-    try {
-      await lockInfo.channel.permissionOverwrites.delete(userId);
-      console.log(chalk.green(`[ANTI-PERM] Cleared lock for user ${userId}`));
-      cleared++;
-    } catch (err) {
-      console.error(chalk.red(`[ANTI-PERM] Failed to clear lock for user ${userId}:`), err);
-    }
-  }
-
-  leaveTracker.clear();
-  lockTimers.clear();
-
-  if (feedbackChannel) {
-    await feedbackChannel.send(`✅ All anti-perm abuse locks and timers have been reset. (Total cleared: ${cleared})`);
-  }
-};
-
-export default antiPermAbuse;
