@@ -1,4 +1,4 @@
-// 🛡️ AntiPermAbuse Module v1.5.0 Pro – DexVyBz Full Action & Admin Logging Patch
+// 🛡️ AntiPermAbuse Module v1.4.4 Pro – DexVyBz Full Action Feedback Patch
 import chalk from 'chalk';
 
 const leaveTracker = new Map();
@@ -10,10 +10,7 @@ const TIME_WINDOW = 70 * 1000;          // 70s to trigger
 const LOCK_DURATION = 60 * 60 * 1000;   // 1h lock
 const RESET_TIME = 180 * 1000;          // reset window
 
-export default async function antiPermAbuse(client, db) {
-  const adminLogChannelId = 'YOUR_ADMIN_LOG_CHANNEL_ID'; // <-- replace with your admin log channel ID
-
-  // === Voice State Tracking ===
+export default async function antiPermAbuse(client) {
   client.on('voiceStateUpdate', async (oldState, newState) => {
     const user = newState.member;
     if (!user || user.user.bot) return;
@@ -38,7 +35,7 @@ export default async function antiPermAbuse(client, db) {
       if (recent.length >= LEAVE_THRESHOLD) {
         console.log(chalk.red(`[ANTI-PERM] Locking ${user.user.username} from VC ${leftChannel.id} for 1 hour due to rapid leaves.`));
 
-        // Find text channel in same guild for messages
+        // Find text channel for feedback
         const textChannel =
           leftChannel.guild.systemChannel ||
           leftChannel.guild.channels.cache.find(c => c.isTextBased() && c.permissionsFor(client.user)?.has('SendMessages'));
@@ -51,8 +48,6 @@ export default async function antiPermAbuse(client, db) {
             await textChannel.send(
               `Yo This Foo <@${user.id}> tweakin’ 😭 I Had To Lock'em Out For An Hr.\nFind One Of My Big Homies To Let'em In 🔒`
             );
-            const logChannel = client.channels.cache.get(adminLogChannelId);
-            if (logChannel) logChannel.send(`[ANTI-PERM] Locked ${user.user.tag} in VC ${leftChannel.name} successfully.`);
           }
 
           // Schedule unlock
@@ -60,23 +55,25 @@ export default async function antiPermAbuse(client, db) {
             try {
               await leftChannel.permissionOverwrites.delete(user.id);
               console.log(chalk.green(`[ANTI-PERM] Unlocked ${user.user.username} from VC ${leftChannel.id}`));
-              if (textChannel) textChannel.send(`Aight <@${user.id}>'s timeout done ⏱️ They can rejoin VC now.`);
-              const logChannel = client.channels.cache.get(adminLogChannelId);
-              if (logChannel) logChannel.send(`[ANTI-PERM] Unlocked ${user.user.tag} from VC ${leftChannel.name}.`);
+              if (textChannel) {
+                await textChannel.send(
+                  `Aight <@${user.id}>'s timeout done ⏱️ They can rejoin VC now.`
+                );
+              }
             } catch (err) {
               console.error(chalk.red(`[ANTI-PERM] Unlock failed for ${user.user.username}:`), err);
-              if (textChannel) textChannel.send(`⚠️ Failed to unlock <@${user.id}> automatically — check VC perms manually.`);
-              const logChannel = client.channels.cache.get(adminLogChannelId);
-              if (logChannel) logChannel.send(`[ANTI-PERM] Failed to unlock ${user.user.tag}: ${err.message}`);
+              if (textChannel) {
+                await textChannel.send(`⚠️ Failed to unlock <@${user.id}> automatically — check VC perms manually.`);
+              }
             }
           }, LOCK_DURATION);
 
           lockTimers.set(userId, unlockTimer);
         } catch (err) {
           console.error(chalk.red(`[ANTI-PERM] Lock failed for ${user.user.username}:`), err);
-          if (textChannel) textChannel.send(`⚠️ Tried to lock <@${user.id}> but couldn't change permissions. Check my role perms.`);
-          const logChannel = client.channels.cache.get(adminLogChannelId);
-          if (logChannel) logChannel.send(`[ANTI-PERM] Lock failed for ${user.user.tag}: ${err.message}`);
+          if (textChannel) {
+            await textChannel.send(`⚠️ Tried to lock <@${user.id}> but couldn't change permissions. Check my role perms.`);
+          }
         }
 
         leaveTracker.delete(userId);
@@ -86,17 +83,24 @@ export default async function antiPermAbuse(client, db) {
       setTimeout(() => leaveTracker.delete(userId), RESET_TIME);
     }
   });
+}
 
-  // === Clear Command for Timers/Locks ===
-  client.on('messageCreate', async (message) => {
-    if (!message.content.startsWith('$clear') || message.author.bot) return;
-    leaveTracker.clear();
-    lockTimers.forEach(timer => clearTimeout(timer));
-    lockTimers.clear();
-    console.log(chalk.blue('[ANTI-PERM] All locks and timers cleared by $clear command.'));
-    const textChannel = message.channel;
-    await textChannel.send('✅ All anti-perm abuse locks and timers have been reset.');
-    const logChannel = client.channels.cache.get(adminLogChannelId);
-    if (logChannel) logChannel.send(`[ANTI-PERM] $clear command executed by ${message.author.tag}.`);
-  });
+// === Clear all locks & timers ===
+export function clearAllLocks(client, channel) {
+  let clearedCount = 0;
+
+  for (const [userId, timer] of lockTimers.entries()) {
+    clearTimeout(timer);
+    lockTimers.delete(userId);
+    clearedCount++;
+  }
+
+  leaveTracker.clear();
+
+  if (channel) {
+    channel.send(`✅ All anti-perm abuse locks and timers have been reset. (${clearedCount} locks cleared)`)
+      .catch(err => console.error(`[ANTI-PERM] Failed to send reset confirmation:`, err));
+  }
+
+  console.log(chalk.yellow(`[ANTI-PERM] Cleared all locks and timers. Total cleared: ${clearedCount}`));
 }
