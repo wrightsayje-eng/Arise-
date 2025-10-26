@@ -1,11 +1,11 @@
 /**
- * leveling.js v1.8 — DexVyBz
+ * leveling.js v1.9 — DexVyBz
  * - Text XP & Leveling
  * - VC XP & Leveling
  * - Sticky VC Leaderboard (every 10 minutes)
  * - Rank emojis & usernames
  * - XP scaling
- * - Help command integrated
+ * - Help command integrated (deduplicated)
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -42,7 +42,7 @@ function xpForLevel(base, multiplier, level) {
 }
 
 function formatHours(xp) {
-  return (xp * 2 / 60).toFixed(1); // each XP = 2 seconds, convert to hours
+  return (xp * 2 / 60 / 60).toFixed(1); // each XP = 2 seconds, convert to hours
 }
 
 const rankEmojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
@@ -51,11 +51,16 @@ const rankEmojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣',
 export default function setupLeveling(client, db) {
   if (!db) return console.error(chalk.red('[LEVELING] Database not initialized'));
 
-  // ===== Ensure DB columns exist =====
-  db.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS xp_text INTEGER DEFAULT 0`);
-  db.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS level_text INTEGER DEFAULT 1`);
-  db.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS xp_vc INTEGER DEFAULT 0`);
-  db.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS level_vc INTEGER DEFAULT 1`);
+  // ===== Ensure DB columns exist (SQLite-safe) =====
+  const ensureColumn = async (sql) => {
+    try { await db.run(sql); } 
+    catch (e) { if (!e.message.includes('duplicate column')) console.error(e); }
+  };
+  ensureColumn('ALTER TABLE users ADD COLUMN xp_text INTEGER DEFAULT 0');
+  ensureColumn('ALTER TABLE users ADD COLUMN level_text INTEGER DEFAULT 1');
+  ensureColumn('ALTER TABLE users ADD COLUMN xp_vc INTEGER DEFAULT 0');
+  ensureColumn('ALTER TABLE users ADD COLUMN level_vc INTEGER DEFAULT 1');
+  ensureColumn('ALTER TABLE users ADD COLUMN username TEXT');
 
   // ===== TEXT LEVELING =====
   client.on('messageCreate', async (message) => {
@@ -98,7 +103,7 @@ export default function setupLeveling(client, db) {
       }
     }
 
-    await db.run('UPDATE users SET xp_text = ?, level_text = ? WHERE id = ?', [user.xp_text, newLevel, message.author.id]);
+    await db.run('UPDATE users SET xp_text = ?, level_text = ?, username = ? WHERE id = ?', [user.xp_text, newLevel, message.author.username, message.author.id]);
   });
 
   // ===== VC LEVELING =====
@@ -155,19 +160,17 @@ export default function setupLeveling(client, db) {
       if (!channel?.isTextBased()) return;
 
       const topUsers = await db.all('SELECT id, username, xp_vc, level_vc FROM users ORDER BY xp_vc DESC LIMIT 10');
+      if (!topUsers.length) return;
 
       const leaderboardDescription = topUsers.map((u, i) => {
         const rankEmoji = rankEmojis[i] || `${i + 1}.`;
         return `${rankEmoji} <@${u.id}> — Level ${u.level_vc} | ${u.xp_vc} XP | ${formatHours(u.xp_vc)} hrs`;
       }).join('\n');
 
-      if (!leaderboardDescription) return;
-
       if (leaderboardDescription === lastLeaderboardSnapshot) {
         console.log(chalk.yellow('[VC Leaderboard] No changes since last update.'));
         return;
       }
-
       lastLeaderboardSnapshot = leaderboardDescription;
 
       const embed = new EmbedBuilder()
@@ -176,6 +179,7 @@ export default function setupLeveling(client, db) {
         .setColor('Red')
         .setTimestamp();
 
+      // Sticky update: edit or send new
       if (vcLeaderboardMessageId) {
         try {
           const msg = await channel.messages.fetch(vcLeaderboardMessageId);
@@ -198,36 +202,11 @@ export default function setupLeveling(client, db) {
   setInterval(updateVcLeaderboard, VC_LEADERBOARD_UPDATE_MS);
   client.once('clientReady', updateVcLeaderboard);
 
-  // ===== Rank Command =====
+  // ===== Rank & Help Commands =====
   client.on('messageCreate', async (message) => {
     if (!db || message.author.bot) return;
     const content = message.content.toLowerCase();
 
     if (content === '$rank') {
       const user = await db.get('SELECT xp_text, level_text, xp_vc, level_vc FROM users WHERE id = ?', [message.author.id]);
-      if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${message.author.username}'s Rank`)
-        .setColor('Red')
-        .addFields(
-          { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
-          { name: '✉️ Chat XP', value: `${user.xp_text}`, inline: true },
-          { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
-          { name: '⏱️ VC XP', value: `${user.xp_vc}`, inline: true }
-        )
-        .setTimestamp();
-
-      await message.channel.send({ embeds: [embed] });
-    }
-
-    // Add other commands here, like $help (deduplicated)
-    if (content === '$help') {
-      if (message._helpSent) return; // prevent double responses
-      message._helpSent = true;
-
-      await message.channel.send(`Commands:\n$rank — Show your rank\n$leaderboard — Show VC leaderboard\n$join — Join VC tracking`);
-      setTimeout(() => { message._helpSent = false; }, 3000);
-    }
-  });
-}
+      if (!
