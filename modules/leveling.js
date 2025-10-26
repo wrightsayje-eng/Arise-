@@ -1,11 +1,10 @@
 /**
- * leveling.js v1.6 — DexVyBz
+ * leveling.js v1.7 — DexVyBz
  * - Text XP & Leveling
  * - VC XP & Leveling
- * - VC Leaderboard (live, auto-updating)
+ * - Live VC Leaderboard (sticky)
  * - XP scaling with progressive thresholds
  * - Confirms XP gains and level-up deliveries
- * - Auto-creates missing DB columns
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -40,14 +39,8 @@ function xpForLevel(base, multiplier, level) {
 }
 
 // ===== MAIN EXPORT =====
-export default async function setupLeveling(client, db) {
+export default function setupLeveling(client, db) {
   if (!db) return;
-
-  // ===== Ensure leveling columns exist =====
-  try { await db.run(`ALTER TABLE users ADD COLUMN xp_text INTEGER DEFAULT 0`); } catch {}
-  try { await db.run(`ALTER TABLE users ADD COLUMN level_text INTEGER DEFAULT 1`); } catch {}
-  try { await db.run(`ALTER TABLE users ADD COLUMN xp_vc INTEGER DEFAULT 0`); } catch {}
-  try { await db.run(`ALTER TABLE users ADD COLUMN level_vc INTEGER DEFAULT 1`); } catch {}
 
   // ===== TEXT LEVELING =====
   client.on('messageCreate', async (message) => {
@@ -147,17 +140,23 @@ export default async function setupLeveling(client, db) {
       const channel = await client.channels.fetch(VC_LEADERBOARD_CHANNEL_ID);
       if (!channel?.isTextBased()) return;
 
-      const topUsers = await db.all('SELECT username, xp_vc, level_vc FROM users ORDER BY xp_vc DESC LIMIT 10');
+      const topUsers = await db.all('SELECT id, xp_vc, level_vc FROM users ORDER BY xp_vc DESC LIMIT 10');
+
+      const lines = [];
+      for (let i = 0; i < topUsers.length; i++) {
+        const u = topUsers[i];
+        const member = await channel.guild.members.fetch(u.id).catch(() => null);
+        const username = member?.user.username || `Unknown#${u.id.slice(-4)}`;
+        const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🔹';
+        lines.push(`${emoji} **${username}** — Level ${u.level_vc} | ${u.xp_vc} XP`);
+      }
 
       const embed = new EmbedBuilder()
         .setTitle('🎧 VC Leaderboard')
-        .setColor('Random')
+        .setColor('Red')
         .setTimestamp()
-        .setDescription(
-          topUsers.length
-            ? topUsers.map((u, i) => `**${i + 1}. ${u.username}** — Level ${u.level_vc} | ${u.xp_vc} XP`).join('\n')
-            : 'No VC XP recorded yet.'
-        );
+        .setDescription(lines.length ? lines.join('\n') : 'No VC XP recorded yet.')
+        .setFooter({ text: 'Updated live every 30 seconds' });
 
       if (vcLeaderboardMessageId) {
         try {
@@ -194,10 +193,10 @@ export default async function setupLeveling(client, db) {
       .setTitle(`${message.author.username}'s Rank`)
       .setColor('Random')
       .addFields(
-        { name: 'Chat Level', value: `${user.level_text}`, inline: true },
-        { name: 'Chat XP', value: `${user.xp_text}`, inline: true },
-        { name: 'VC Level', value: `${user.level_vc}`, inline: true },
-        { name: 'VC XP', value: `${user.xp_vc}`, inline: true }
+        { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
+        { name: '💬 Chat XP', value: `${user.xp_text}`, inline: true },
+        { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
+        { name: '🎧 VC XP', value: `${user.xp_vc}`, inline: true }
       )
       .setTimestamp();
 
