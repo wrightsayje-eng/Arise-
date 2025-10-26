@@ -209,4 +209,27 @@ export default function setupLeveling(client, db) {
 
     if (content === '$rank') {
       const user = await db.get('SELECT xp_text, level_text, xp_vc, level_vc FROM users WHERE id = ?', [message.author.id]);
-      if (!
+      if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${message.author.username}'s Rank`)
+        .setColor('Red')
+        .addFields(
+          { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
+          { name: '✉️ Chat XP', value: `${user.xp_text}`, inline: true },
+          { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
+          { name: '⏱️ VC XP', value: `${user.xp_vc}`, inline: true }
+        )
+        .setTimestamp();
+
+      await message.channel.send({ embeds: [embed] });
+    }
+
+    if (content === '$help') {
+      if (message._helpSent) return;
+      message._helpSent = true;
+      await message.channel.send(`Commands:\n$rank — Show your rank\n$leaderboard — Show VC leaderboard\n$join — Join VC tracking`);
+      setTimeout(() => { message._helpSent = false; }, 3000);
+    }
+  });
+}
