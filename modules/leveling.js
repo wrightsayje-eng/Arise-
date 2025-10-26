@@ -5,6 +5,7 @@
  * - VC Leaderboard (live, auto-updating)
  * - XP scaling with progressive thresholds
  * - Confirms XP gains and level-up deliveries
+ * - Auto-creates missing DB columns
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -39,8 +40,14 @@ function xpForLevel(base, multiplier, level) {
 }
 
 // ===== MAIN EXPORT =====
-export default function setupLeveling(client, db) {
+export default async function setupLeveling(client, db) {
   if (!db) return;
+
+  // ===== Ensure leveling columns exist =====
+  try { await db.run(`ALTER TABLE users ADD COLUMN xp_text INTEGER DEFAULT 0`); } catch {}
+  try { await db.run(`ALTER TABLE users ADD COLUMN level_text INTEGER DEFAULT 1`); } catch {}
+  try { await db.run(`ALTER TABLE users ADD COLUMN xp_vc INTEGER DEFAULT 0`); } catch {}
+  try { await db.run(`ALTER TABLE users ADD COLUMN level_vc INTEGER DEFAULT 1`); } catch {}
 
   // ===== TEXT LEVELING =====
   client.on('messageCreate', async (message) => {
