@@ -1,143 +1,132 @@
 /**
- * =============================================
- * leveling.js v1.5 Stable — DexVyBz XP Scaling
- * - Progressive XP formula for realistic leveling
- * - Per-message + VC-time XP gain
- * - Safe DB handling, cooldowns, and tracking
- * =============================================
+ * leveling.js v1.4 — DexVyBz
+ * Tracks XP from messages and VC activity
+ * Sends level-up messages in the same text channel
+ * Scaling XP thresholds for progressive leveling
  */
 
+import { EmbedBuilder } from 'discord.js';
 import chalk from 'chalk';
 
-const XP_PER_MESSAGE = 10;
-const MESSAGE_COOLDOWN_MS = 60 * 1000; // 60s cooldown
-const BASE_XP_REQUIREMENT = 100; // base scaling constant
-const joinTimes = new Map();
-const messageCooldowns = new Map();
+// CONFIGURATION
+const MESSAGE_XP = 1;
+const VC_XP_PER_SEC = 1 / 120; // 1 XP per 2 minutes
+const LEVEL_BASE = 280;         // Base XP for Level 2
+const LEVEL_MULTIPLIER = 1.5;   // Growth per level
 
-// === Progressive XP Formula ===
-// Increases required XP as level goes up (smooth exponential)
-function getXpForNextLevel(level) {
-  return Math.floor(BASE_XP_REQUIREMENT * Math.pow(level, 2) + 100);
+// State
+const messageCooldowns = new Map();
+const joinTimes = new Map();
+const lastLevelSent = new Map();
+
+// ===== Helper: Calculate XP threshold for level N =====
+function xpForLevel(level) {
+  if (level === 1) return 0;
+  let xp = LEVEL_BASE;
+  for (let i = 2; i <= level; i++) {
+    xp = Math.floor(xp * LEVEL_MULTIPLIER);
+  }
+  return xp;
 }
 
 export default function setupLeveling(client, db) {
-  if (!db) {
-    console.warn(chalk.yellow('[LEVELING] ⚠️ DB not passed — leveling disabled.'));
-    return;
-  }
+  if (!db) return;
 
-  // === Message XP Gain ===
+  // ===== Text message XP =====
   client.on('messageCreate', async (message) => {
-    if (message.author.bot || !db) return;
+    if (!db || message.author.bot) return;
+
+    const now = Date.now();
+    const lastMsg = messageCooldowns.get(message.author.id) || 0;
+    if (now - lastMsg < 60000) return; // 1 min cooldown
+    messageCooldowns.set(message.author.id, now);
+
+    // Get or create user
+    let user = await db.get('SELECT xp, level FROM users WHERE id = ?', [message.author.id]);
+    if (!user) {
+      await db.run(
+        'INSERT INTO users (id, username, xp, level) VALUES (?, ?, ?, ?)',
+        [message.author.id, message.author.username, MESSAGE_XP, 1]
+      );
+      user = { xp: MESSAGE_XP, level: 1 };
+    } else {
+      user.xp = user.xp || 0;
+      user.level = user.level || 1;
+      user.xp += MESSAGE_XP;
+    }
+
+    // Determine new level
+    let newLevel = user.level;
+    while (user.xp >= xpForLevel(newLevel + 1)) newLevel++;
+
+    // Send level-up embed if level increased
+    if (newLevel > user.level && lastLevelSent.get(message.author.id) !== newLevel) {
+      const embed = new EmbedBuilder()
+        .setTitle('🎉 Level Up!')
+        .setDescription(`${message.author} just reached **Level ${newLevel}**!`)
+        .setColor('Random')
+        .setTimestamp();
+
+      try {
+        await message.channel.send({ embeds: [embed] });
+        console.log(chalk.green(`[LEVELING] Level-up delivered to ${message.author.tag} in #${message.channel.name}`));
+        lastLevelSent.set(message.author.id, newLevel);
+      } catch (err) {
+        console.error(chalk.red(`[LEVELING] Failed to send level-up message: `), err);
+      }
+    }
+
+    await db.run('UPDATE users SET xp = ?, level = ? WHERE id = ?', [user.xp, newLevel, message.author.id]);
+  });
+
+  // ===== Voice channel XP =====
+  client.on('voiceStateUpdate', async (oldState, newState) => {
+    const memberId = newState.id;
+    const oldChannel = oldState.channelId;
+    const newChannel = newState.channelId;
+    const now = Date.now();
+
+    // Join VC
+    if (!oldChannel && newChannel) joinTimes.set(memberId, now);
+
+    // Leave VC
+    if (oldChannel && !newChannel) {
+      const joinedAt = joinTimes.get(memberId);
+      if (!joinedAt) return;
+      joinTimes.delete(memberId);
+
+      const durationSec = (now - joinedAt) / 1000;
+      const xpEarned = Math.floor(durationSec * VC_XP_PER_SEC);
+
+      const user = await db.get('SELECT xp, level FROM users WHERE id = ?', [memberId]);
+      if (user) {
+        const newXP = user.xp + xpEarned;
+        await db.run('UPDATE users SET xp = ? WHERE id = ?', [newXP, memberId]);
+        console.log(chalk.blue(`[LEVELING] ${memberId} earned ${xpEarned} XP from VC activity`));
+      }
+    }
+  });
+
+  // ===== Optional: $rank command =====
+  client.on('messageCreate', async (message) => {
+    if (!db || message.author.bot) return;
+    if (!message.content.startsWith('$rank')) return;
 
     const userId = message.author.id;
-    const now = Date.now();
-
-    // Cooldown check
-    const last = messageCooldowns.get(userId) || 0;
-    if (now - last < MESSAGE_COOLDOWN_MS) return;
-    messageCooldowns.set(userId, now);
-
-    try {
-      // Get or create user
-      let user = await db.get('SELECT id, username, xp, level FROM users WHERE id = ?', [userId]);
-      if (!user) {
-        await db.run('INSERT INTO users (id, username, xp, level, vc_seconds) VALUES (?, ?, ?, ?, ?)', [
-          userId,
-          message.author.username,
-          0,
-          1,
-          0,
-        ]);
-        user = { xp: 0, level: 1 };
-      }
-
-      // Add XP
-      let newXp = user.xp + XP_PER_MESSAGE;
-      let level = user.level;
-      const xpNeeded = getXpForNextLevel(level);
-
-      // Level-up check
-      if (newXp >= xpNeeded) {
-        newXp -= xpNeeded;
-        level++;
-        await message.channel.send(`🎉 ${message.author} leveled up to **Level ${level}**! 🆙`);
-      }
-
-      await db.run('UPDATE users SET xp = ?, level = ? WHERE id = ?', [newXp, level, userId]);
-    } catch (err) {
-      console.error(chalk.red('[LEVELING] messageCreate error:'), err);
+    const user = await db.get('SELECT xp, level FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return message.channel.send(`You have no XP yet, ${message.author}. Start chatting or joining VC!`);
     }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${message.author.username}'s Rank`)
+      .setColor('Random')
+      .addFields(
+        { name: 'Level', value: `${user.level}`, inline: true },
+        { name: 'Total XP', value: `${user.xp}`, inline: true }
+      )
+      .setTimestamp();
+
+    await message.channel.send({ embeds: [embed] });
   });
-
-  // === Voice Channel XP ===
-  client.on('voiceStateUpdate', async (oldState, newState) => {
-    if (!db) return;
-    const userId = newState.id;
-    const now = Date.now();
-
-    try {
-      // Joined VC → record join time
-      if (!oldState.channelId && newState.channelId) {
-        joinTimes.set(userId, now);
-      }
-
-      // Left VC → calculate time & grant XP
-      if (oldState.channelId && !newState.channelId) {
-        const joinedAt = joinTimes.get(userId);
-        joinTimes.delete(userId);
-
-        if (!joinedAt) return;
-
-        const durationSec = Math.floor((now - joinedAt) / 1000);
-        const vcXp = Math.floor(durationSec / 6); // ~10 XP per minute in VC
-
-        let user = await db.get('SELECT xp, level FROM users WHERE id = ?', [userId]);
-        if (!user) {
-          await db.run('INSERT INTO users (id, username, xp, level, vc_seconds) VALUES (?, ?, ?, ?, ?)', [
-            userId,
-            newState.member?.user?.username || 'Unknown',
-            vcXp,
-            1,
-            durationSec,
-          ]);
-          return;
-        }
-
-        const totalXp = user.xp + vcXp;
-        const level = user.level;
-        const xpNeeded = getXpForNextLevel(level);
-
-        // Handle level up for VC XP
-        if (totalXp >= xpNeeded) {
-          const newLevel = level + 1;
-          const newXp = totalXp - xpNeeded;
-          await db.run('UPDATE users SET xp = ?, level = ?, vc_seconds = vc_seconds + ? WHERE id = ?', [
-            newXp,
-            newLevel,
-            durationSec,
-            userId,
-          ]);
-
-          const systemChannel =
-            oldState.guild.systemChannel ||
-            oldState.guild.channels.cache.find((c) => c.isTextBased() && c.permissionsFor(client.user)?.has('SendMessages'));
-
-          if (systemChannel)
-            await systemChannel.send(`🎧 ${newState.member} just leveled up to **Level ${newLevel}** for VC activity! 🔊`);
-        } else {
-          await db.run('UPDATE users SET xp = ?, vc_seconds = vc_seconds + ? WHERE id = ?', [
-            totalXp,
-            durationSec,
-            userId,
-          ]);
-        }
-      }
-    } catch (err) {
-      console.error(chalk.red('[LEVELING] voiceStateUpdate error:'), err);
-    }
-  });
-
-  console.log(chalk.green('✅ Leveling system v1.5 initialized and listening for activity.'));
 }
