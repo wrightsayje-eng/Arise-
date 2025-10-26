@@ -1,8 +1,10 @@
-// commandHandler.js v1.4.2 Patched
-import { Client, GatewayIntentBits } from 'discord.js';
+// commandHandler.js v1.5 — DexVyBz Patched
+import { Client } from 'discord.js';
 import antiPermAbuse from './antiPermAbuse.js';
 
 export default function setupCommands(client) {
+  const helpCooldown = new Map(); // prevents duplicate $help spam
+
   client.on('messageCreate', async (message) => {
     if (!message.content.startsWith('$') || message.author.bot) return;
     const [cmd, ...args] = message.content.slice(1).trim().split(/\s+/);
@@ -12,6 +14,10 @@ export default function setupCommands(client) {
       // $help
       // =========================
       if (cmd === 'help') {
+        if (helpCooldown.has(message.author.id)) return; // skip duplicate
+        helpCooldown.set(message.author.id, true);
+        setTimeout(() => helpCooldown.delete(message.author.id), 3000);
+
         return message.channel.send(
           '🛠 **Available Commands:**\n' +
           '`$join` - Bot joins VC\n' +
@@ -21,7 +27,9 @@ export default function setupCommands(client) {
           '`$clearstatus` - Clear VC status\n' +
           '`$scan` - Scan links\n' +
           '`$lock` - Lock VC temporarily\n' +
-          '`$clear` - Clear all locks and timers'
+          '`$clear` - Clear all locks and timers\n' +
+          '`$rank` - Show your chat & VC rank\n' +
+          '`$leaderboard` - Show VC leaderboard'
         );
       }
 
@@ -36,8 +44,8 @@ export default function setupCommands(client) {
         if (!memberVC) return message.reply('❌ You must be in a voice channel to set a status.');
 
         if (!memberVC.originalName) memberVC.originalName = memberVC.name;
-
         await memberVC.setName(`${memberVC.originalName} - ${statusText}`);
+
         message.reply(`✅ Voice Channel status set: "${statusText}"`);
         console.log(`[SETSTATUS] VC "${memberVC.name}" updated by ${message.author.tag}`);
       }
@@ -67,8 +75,11 @@ export default function setupCommands(client) {
       }
 
       // =========================
-      // Add other existing commands here (join, leave, play, scan, lock, etc.)
-      // Make sure each uses safeExecute or try/catch for stability
+      // $rank & $leaderboard integration (safe hooks for leveling.js)
+      // =========================
+      // Note: The leveling.js module handles these commands now. This handler does not conflict.
+      // Future commands can follow the same pattern:
+      // try/catch + reply + logging
       // =========================
 
     } catch (err) {
