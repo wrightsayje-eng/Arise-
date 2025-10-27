@@ -1,12 +1,12 @@
 /**
- * leveling.js v2.0 — DexVyBz
+ * leveling.js v2.1 — DexVyBz Patched
  * - Text XP & Leveling
  * - VC XP & Leveling
  * - Sticky VC Leaderboard (every 10 minutes)
  * - Rank emojis & usernames
  * - XP scaling
  * - Hours display
- * - Help command integration safe
+ * - Safe DB calls + crash prevention
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -54,17 +54,22 @@ export default async function setupLeveling(client, db) {
   if (!db) return console.error(chalk.red('[LEVELING] Database not initialized'));
 
   // ===== Ensure table exists =====
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT,
-      xp_text INTEGER DEFAULT 0,
-      level_text INTEGER DEFAULT 1,
-      xp_vc INTEGER DEFAULT 0,
-      level_vc INTEGER DEFAULT 1
-    )
-  `);
-  console.log(chalk.green('[LEVELING] users table ensured'));
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT,
+        xp_text INTEGER DEFAULT 0,
+        level_text INTEGER DEFAULT 1,
+        xp_vc INTEGER DEFAULT 0,
+        level_vc INTEGER DEFAULT 1
+      )
+    `);
+    console.log(chalk.green('[LEVELING] users table ensured'));
+  } catch (err) {
+    console.error(chalk.red('[LEVELING] Failed to ensure users table:'), err);
+    return;
+  }
 
   // ===== TEXT LEVELING =====
   client.on('messageCreate', async (message) => {
@@ -75,18 +80,24 @@ export default async function setupLeveling(client, db) {
     if (now - lastMsg < TEXT_MESSAGE_COOLDOWN_MS) return;
     textCooldowns.set(message.author.id, now);
 
-    // Fetch or create user
-    let user = await db.get('SELECT xp_text, level_text, username FROM users WHERE id = ?', [message.author.id]);
-    if (!user) {
-      await db.run(
-        'INSERT INTO users (id, username, xp_text, level_text, xp_vc, level_vc) VALUES (?, ?, ?, ?, ?, ?)',
-        [message.author.id, message.author.username, TEXT_XP_PER_MESSAGE, 1, 0, 1]
-      );
-      user = { xp_text: TEXT_XP_PER_MESSAGE, level_text: 1, username: message.author.username };
-    } else {
-      user.xp_text = user.xp_text || 0;
-      user.level_text = user.level_text || 1;
-      user.xp_text += TEXT_XP_PER_MESSAGE;
+    let user;
+    try {
+      user = await db.get('SELECT * FROM users WHERE id = ?', [message.author.id]);
+
+      if (!user) {
+        await db.run(
+          'INSERT INTO users (id, username, xp_text, level_text, xp_vc, level_vc) VALUES (?, ?, ?, ?, ?, ?)',
+          [message.author.id, message.author.username, TEXT_XP_PER_MESSAGE, 1, 0, 1]
+        );
+        user = { xp_text: TEXT_XP_PER_MESSAGE, level_text: 1, xp_vc: 0, level_vc: 1, username: message.author.username };
+      } else {
+        user.xp_text = user.xp_text || 0;
+        user.level_text = user.level_text || 1;
+        user.xp_text += TEXT_XP_PER_MESSAGE;
+      }
+    } catch (err) {
+      console.error('[LEVELING] Text XP DB error:', err);
+      return;
     }
 
     let newLevel = user.level_text;
@@ -108,7 +119,16 @@ export default async function setupLeveling(client, db) {
       }
     }
 
-    await db.run('UPDATE users SET xp_text = ?, level_text = ? WHERE id = ?', [user.xp_text, newLevel, message.author.id]);
+    try {
+      await db.run('UPDATE users SET xp_text = ?, level_text = ?, username = ? WHERE id = ?', [
+        user.xp_text,
+        newLevel,
+        message.author.username,
+        message.author.id
+      ]);
+    } catch (err) {
+      console.error('[LEVELING] Failed to update user XP:', err);
+    }
   });
 
   // ===== VC LEVELING =====
@@ -118,7 +138,9 @@ export default async function setupLeveling(client, db) {
     const newChannel = newState.channelId;
     const now = Date.now();
 
-    if (!oldChannel && newChannel) vcJoinTimes.set(memberId, now);
+    if (!oldChannel && newChannel) {
+      vcJoinTimes.set(memberId, now);
+    }
 
     if (oldChannel && !newChannel) {
       const joinedAt = vcJoinTimes.get(memberId);
@@ -128,36 +150,53 @@ export default async function setupLeveling(client, db) {
       const durationSec = (now - joinedAt) / 1000;
       const xpEarned = Math.floor(durationSec * VC_XP_PER_SEC);
 
-      let user = await db.get('SELECT xp_vc, level_vc, username FROM users WHERE id = ?', [memberId]);
-      if (!user) return;
+      let user;
+      try {
+        user = await db.get('SELECT * FROM users WHERE id = ?', [memberId]);
+
+        if (!user) {
+          await db.run(
+            'INSERT INTO users (id, username, xp_text, level_text, xp_vc, level_vc) VALUES (?, ?, ?, ?, ?, ?)',
+            [memberId, newState.member?.user.username || 'Unknown', 0, 1, xpEarned, 1]
+          );
+          user = { xp_vc: xpEarned, level_vc: 1, xp_text: 0, level_text: 1, username: newState.member?.user.username || 'Unknown' };
+        }
+      } catch (err) {
+        console.error('[LEVELING] VC XP DB error:', err);
+        return;
+      }
 
       const newXP = (user.xp_vc || 0) + xpEarned;
       let newLevel = user.level_vc || 1;
       while (newXP >= xpForLevel(VC_BASE_XP, VC_LEVEL_MULTIPLIER, newLevel + 1)) newLevel++;
 
-      await db.run('UPDATE users SET xp_vc = ?, level_vc = ?, username = ? WHERE id = ?', [
-        newXP,
-        newLevel,
-        newState.member?.user.username || user.username,
-        memberId
-      ]);
-      console.log(chalk.blue(`[LEVELING] ${memberId} earned ${xpEarned} XP in VC, total XP: ${newXP}`));
+      try {
+        await db.run('UPDATE users SET xp_vc = ?, level_vc = ?, username = ? WHERE id = ?', [
+          newXP,
+          newLevel,
+          newState.member?.user.username || user.username,
+          memberId
+        ]);
+        console.log(chalk.blue(`[LEVELING] ${memberId} earned ${xpEarned} XP in VC, total XP: ${newXP}`));
+      } catch (err) {
+        console.error('[LEVELING] Failed to update VC XP:', err);
+      }
 
       if (newLevel > user.level_vc && lastVCLevel.get(memberId) !== newLevel) {
-        const vcChannel = await newState.guild.channels.fetch(VC_ANNOUNCE_CHANNEL_ID);
-        if (vcChannel?.isTextBased()) {
-          const embed = new EmbedBuilder()
-            .setTitle('🎉 VC Level Up!')
-            .setDescription(`<@${memberId}> reached **Level ${newLevel}** from VC activity!`)
-            .setColor('Red')
-            .setTimestamp();
-          try {
+        try {
+          const vcChannel = await newState.guild.channels.fetch(VC_ANNOUNCE_CHANNEL_ID);
+          if (vcChannel?.isTextBased()) {
+            const embed = new EmbedBuilder()
+              .setTitle('🎉 VC Level Up!')
+              .setDescription(`<@${memberId}> reached **Level ${newLevel}** from VC activity!`)
+              .setColor('Red')
+              .setTimestamp();
             await vcChannel.send({ embeds: [embed] });
             lastVCLevel.set(memberId, newLevel);
             console.log(chalk.green(`[LEVELING] VC level-up delivered for ${memberId}`));
-          } catch (err) {
-            console.error(chalk.red('[LEVELING] Failed to deliver VC level-up:'), err);
           }
+        } catch (err) {
+          console.error('[LEVELING] Failed to announce VC level-up:', err);
         }
       }
     }
@@ -213,25 +252,35 @@ export default async function setupLeveling(client, db) {
   setInterval(updateVcLeaderboard, VC_LEADERBOARD_UPDATE_MS);
   client.once('clientReady', updateVcLeaderboard);
 
-  // ===== $rank command =====
+  // ===== $rank & $leaderboard commands =====
   client.on('messageCreate', async (message) => {
     if (!db || message.author.bot) return;
-    if (message.content.toLowerCase() !== '$rank') return;
+    const content = message.content.toLowerCase();
 
-    const user = await db.get('SELECT xp_text, level_text, xp_vc, level_vc FROM users WHERE id = ?', [message.author.id]);
-    if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
+    if (content === '$rank') {
+      try {
+        const user = await db.get('SELECT * FROM users WHERE id = ?', [message.author.id]);
+        if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
 
-    const embed = new EmbedBuilder()
-      .setTitle(`${message.author.username}'s Rank`)
-      .setColor('Red')
-      .addFields(
-        { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
-        { name: '✉️ Chat XP', value: `${user.xp_text}`, inline: true },
-        { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
-        { name: '⏱️ VC XP', value: `${user.xp_vc} | ${formatHours(user.xp_vc)} hrs`, inline: true }
-      )
-      .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setTitle(`${message.author.username}'s Rank`)
+          .setColor('Red')
+          .addFields(
+            { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
+            { name: '✉️ Chat XP', value: `${user.xp_text}`, inline: true },
+            { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
+            { name: '⏱️ VC XP', value: `${user.xp_vc} | ${formatHours(user.xp_vc)} hrs`, inline: true }
+          )
+          .setTimestamp();
 
-    await message.channel.send({ embeds: [embed] });
+        await message.channel.send({ embeds: [embed] });
+      } catch (err) {
+        console.error('[LEVELING] $rank error:', err);
+      }
+    }
+
+    if (content === '$leaderboard') {
+      await updateVcLeaderboard();
+    }
   });
 }
