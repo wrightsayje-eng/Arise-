@@ -1,7 +1,7 @@
-// commandHandler.js v1.6 — DexVyBz Patched
-import { Client } from 'discord.js';
+// commandHandler.js v1.7 — DexVyBz Patched
+import { EmbedBuilder } from 'discord.js';
 import antiPermAbuse from './antiPermAbuse.js';
-import setupLeveling from './leveling.js'; // Import leveling functions
+import setupLeveling from './leveling.js';
 
 export default async function setupCommands(client, db) {
   if (!client) throw new Error('[COMMANDS] Discord client not provided');
@@ -10,7 +10,7 @@ export default async function setupCommands(client, db) {
   // Initialize leveling module (handles XP, ranks, leaderboard)
   await setupLeveling(client, db);
 
-  const helpCooldown = new Map(); // Prevents duplicate $help spam
+  const helpCooldown = new Map(); // Prevent duplicate $help spam
 
   client.on('messageCreate', async (message) => {
     if (!message.content.startsWith('$') || message.author.bot) return;
@@ -22,23 +22,30 @@ export default async function setupCommands(client, db) {
       // $help
       // =========================
       if (cmd === 'help') {
-        if (helpCooldown.has(message.author.id)) return; // skip duplicate
-        helpCooldown.set(message.author.id, true);
-        setTimeout(() => helpCooldown.delete(message.author.id), 3000);
+        const now = Date.now();
+        const lastSent = helpCooldown.get(message.author.id) || 0;
+        if (now - lastSent < 5000) return; // 5-second cooldown
+        helpCooldown.set(message.author.id, now);
 
-        return message.channel.send(
-          '🛠 **Available Commands:**\n' +
-          '`$join` - Bot joins VC\n' +
-          '`$leave` - Bot leaves VC\n' +
-          '`$play <url>` - Play music\n' +
-          '`$setstatus <text>` - Set VC status\n' +
-          '`$clearstatus` - Clear VC status\n' +
-          '`$scan` - Scan links\n' +
-          '`$lock` - Lock VC temporarily\n' +
-          '`$clear` - Clear all locks and timers\n' +
-          '`$rank` - Show your chat & VC rank\n' +
-          '`$leaderboard` - Show VC leaderboard'
-        );
+        const embed = new EmbedBuilder()
+          .setTitle('🛠 Available Commands')
+          .setColor('Red')
+          .setDescription(
+            '`$join` - Bot joins VC\n' +
+            '`$leave` - Bot leaves VC\n' +
+            '`$play <url>` - Play music\n' +
+            '`$setstatus <text>` - Set VC status\n' +
+            '`$clearstatus` - Clear VC status\n' +
+            '`$scan` - Scan links\n' +
+            '`$lock` - Lock VC temporarily\n' +
+            '`$clear` - Clear all locks and timers\n' +
+            '`$rank` - Show your chat & VC rank\n' +
+            '`$leaderboard` - Show VC leaderboard'
+          )
+          .setFooter({ text: `Requested by ${message.author.tag}` })
+          .setTimestamp();
+
+        return message.channel.send({ embeds: [embed] });
       }
 
       // =========================
@@ -51,9 +58,10 @@ export default async function setupCommands(client, db) {
         const memberVC = message.member.voice.channel;
         if (!memberVC) return message.reply('❌ You must be in a voice channel to set a status.');
 
-        if (!memberVC.originalName) memberVC.originalName = memberVC.name;
-        await memberVC.setName(`${memberVC.originalName} - ${statusText}`);
+        const original = memberVC.originalName || memberVC.name;
+        memberVC.originalName = original;
 
+        await memberVC.setName(`${original} - ${statusText}`);
         message.reply(`✅ Voice Channel status set: "${statusText}"`);
         console.log(`[SETSTATUS] VC "${memberVC.name}" updated by ${message.author.tag}`);
         return;
@@ -91,12 +99,9 @@ export default async function setupCommands(client, db) {
 
       // =========================
       // $rank and $leaderboard
-      // Delegates to leveling.js listeners
+      // Handled in leveling.js
       // =========================
-      if (cmd === 'rank' || cmd === 'leaderboard') {
-        // No code needed here; handled by leveling.js
-        return;
-      }
+      if (cmd === 'rank' || cmd === 'leaderboard') return;
 
       // =========================
       // Other commands (join, leave, play, scan, lock) can be added below
