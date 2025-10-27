@@ -5,15 +5,14 @@
  * - Sticky VC Leaderboard (every 10 minutes)
  * - Rank emojis & usernames
  * - XP scaling
- * - Help command integrated (deduplicated)
+ * - Help command integrated
  */
 
 import { EmbedBuilder } from 'discord.js';
 import chalk from 'chalk';
 
-// ===== CONFIG =====
 const TEXT_XP_PER_MESSAGE = 1;
-const TEXT_MESSAGE_COOLDOWN_MS = 60 * 1000; // 1 min cooldown
+const TEXT_MESSAGE_COOLDOWN_MS = 60 * 1000; // 1 min
 const TEXT_BASE_XP = 280;
 const TEXT_LEVEL_MULTIPLIER = 1.5;
 
@@ -23,17 +22,16 @@ const VC_LEVEL_MULTIPLIER = 2;
 
 const VC_ANNOUNCE_CHANNEL_ID = '1342342913773932703';
 const VC_LEADERBOARD_CHANNEL_ID = '1432033131430543380';
-const VC_LEADERBOARD_UPDATE_MS = 10 * 60 * 1000; // 10 minutes
+const VC_LEADERBOARD_UPDATE_MS = 10 * 60 * 1000; // 10 min
 
-// ===== STATE =====
 const textCooldowns = new Map();
 const vcJoinTimes = new Map();
 const lastTextLevel = new Map();
 const lastVCLevel = new Map();
 let vcLeaderboardMessageId = null;
 let lastLeaderboardSnapshot = '';
+const helpCooldown = new Set();
 
-// ===== HELPERS =====
 function xpForLevel(base, multiplier, level) {
   if (level === 1) return 0;
   let xp = base;
@@ -42,25 +40,19 @@ function xpForLevel(base, multiplier, level) {
 }
 
 function formatHours(xp) {
-  return (xp * 2 / 60 / 60).toFixed(1); // each XP = 2 seconds, convert to hours
+  return ((xp * 2) / 3600).toFixed(1); // each XP = 2 sec → convert to hours
 }
 
 const rankEmojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
 
-// ===== MAIN EXPORT =====
 export default function setupLeveling(client, db) {
   if (!db) return console.error(chalk.red('[LEVELING] Database not initialized'));
 
-  // ===== Ensure DB columns exist (SQLite-safe) =====
-  const ensureColumn = async (sql) => {
-    try { await db.run(sql); } 
-    catch (e) { if (!e.message.includes('duplicate column')) console.error(e); }
-  };
-  ensureColumn('ALTER TABLE users ADD COLUMN xp_text INTEGER DEFAULT 0');
-  ensureColumn('ALTER TABLE users ADD COLUMN level_text INTEGER DEFAULT 1');
-  ensureColumn('ALTER TABLE users ADD COLUMN xp_vc INTEGER DEFAULT 0');
-  ensureColumn('ALTER TABLE users ADD COLUMN level_vc INTEGER DEFAULT 1');
-  ensureColumn('ALTER TABLE users ADD COLUMN username TEXT');
+  // ===== Ensure DB columns exist =====
+  db.run('ALTER TABLE users ADD COLUMN xp_text INTEGER DEFAULT 0');
+  db.run('ALTER TABLE users ADD COLUMN level_text INTEGER DEFAULT 1');
+  db.run('ALTER TABLE users ADD COLUMN xp_vc INTEGER DEFAULT 0');
+  db.run('ALTER TABLE users ADD COLUMN level_vc INTEGER DEFAULT 1');
 
   // ===== TEXT LEVELING =====
   client.on('messageCreate', async (message) => {
@@ -93,17 +85,13 @@ export default function setupLeveling(client, db) {
         .setDescription(`${message.author} reached **Level ${newLevel}** in chat!`)
         .setColor('Red')
         .setTimestamp();
-
       try {
         await message.channel.send({ embeds: [embed] });
-        console.log(chalk.green(`[LEVELING] Text level-up delivered for ${message.author.tag}`));
         lastTextLevel.set(message.author.id, newLevel);
-      } catch (err) {
-        console.error(chalk.red('[LEVELING] Failed to deliver text level-up:'), err);
-      }
+      } catch { /* silently fail */ }
     }
 
-    await db.run('UPDATE users SET xp_text = ?, level_text = ?, username = ? WHERE id = ?', [user.xp_text, newLevel, message.author.username, message.author.id]);
+    await db.run('UPDATE users SET xp_text = ?, level_text = ? WHERE id = ?', [user.xp_text, newLevel, message.author.id]);
   });
 
   // ===== VC LEVELING =====
@@ -130,8 +118,10 @@ export default function setupLeveling(client, db) {
       let newLevel = user.level_vc || 1;
       while (newXP >= xpForLevel(VC_BASE_XP, VC_LEVEL_MULTIPLIER, newLevel + 1)) newLevel++;
 
-      await db.run('UPDATE users SET xp_vc = ?, level_vc = ?, username = ? WHERE id = ?', [newXP, newLevel, newState.member?.user.username || user.username, memberId]);
-      console.log(chalk.blue(`[LEVELING] ${memberId} earned ${xpEarned} XP in VC, total XP: ${newXP}`));
+      await db.run(
+        'UPDATE users SET xp_vc = ?, level_vc = ?, username = ? WHERE id = ?',
+        [newXP, newLevel, newState.member?.user.username || user.username, memberId]
+      );
 
       if (newLevel > user.level_vc && lastVCLevel.get(memberId) !== newLevel) {
         const vcChannel = await newState.guild.channels.fetch(VC_ANNOUNCE_CHANNEL_ID);
@@ -141,13 +131,8 @@ export default function setupLeveling(client, db) {
             .setDescription(`<@${memberId}> reached **Level ${newLevel}** from VC activity!`)
             .setColor('Red')
             .setTimestamp();
-          try {
-            await vcChannel.send({ embeds: [embed] });
-            console.log(chalk.green(`[LEVELING] VC level-up delivered for ${memberId}`));
-            lastVCLevel.set(memberId, newLevel);
-          } catch (err) {
-            console.error(chalk.red('[LEVELING] Failed to deliver VC level-up:'), err);
-          }
+          try { await vcChannel.send({ embeds: [embed] }); } catch {}
+          lastVCLevel.set(memberId, newLevel);
         }
       }
     }
@@ -160,17 +145,16 @@ export default function setupLeveling(client, db) {
       if (!channel?.isTextBased()) return;
 
       const topUsers = await db.all('SELECT id, username, xp_vc, level_vc FROM users ORDER BY xp_vc DESC LIMIT 10');
+
       if (!topUsers.length) return;
 
       const leaderboardDescription = topUsers.map((u, i) => {
         const rankEmoji = rankEmojis[i] || `${i + 1}.`;
-        return `${rankEmoji} <@${u.id}> — Level ${u.level_vc} | ${u.xp_vc} XP | ${formatHours(u.xp_vc)} hrs`;
+        const xp_vc = u.xp_vc || 0;
+        return `${rankEmoji} <@${u.id}> — Level ${u.level_vc || 1} | ${xp_vc} XP | ${formatHours(xp_vc)} hrs`;
       }).join('\n');
 
-      if (leaderboardDescription === lastLeaderboardSnapshot) {
-        console.log(chalk.yellow('[VC Leaderboard] No changes since last update.'));
-        return;
-      }
+      if (leaderboardDescription === lastLeaderboardSnapshot) return;
       lastLeaderboardSnapshot = leaderboardDescription;
 
       const embed = new EmbedBuilder()
@@ -179,7 +163,6 @@ export default function setupLeveling(client, db) {
         .setColor('Red')
         .setTimestamp();
 
-      // Sticky update: edit or send new
       if (vcLeaderboardMessageId) {
         try {
           const msg = await channel.messages.fetch(vcLeaderboardMessageId);
@@ -192,44 +175,62 @@ export default function setupLeveling(client, db) {
         const msg = await channel.send({ embeds: [embed] });
         vcLeaderboardMessageId = msg.id;
       }
-
-      console.log(chalk.green('[VC Leaderboard] Updated successfully'));
-    } catch (err) {
-      console.error(chalk.red('[VC Leaderboard] Update failed:'), err);
-    }
+    } catch (err) { console.error(chalk.red('[VC Leaderboard] Update failed:'), err); }
   }
 
   setInterval(updateVcLeaderboard, VC_LEADERBOARD_UPDATE_MS);
   client.once('clientReady', updateVcLeaderboard);
 
-  // ===== Rank & Help Commands =====
+  // ===== RANK & LEADERBOARD COMMANDS =====
   client.on('messageCreate', async (message) => {
-    if (!db || message.author.bot) return;
-    const content = message.content.toLowerCase();
+    if (!db || message.author.bot || !message.content.startsWith('$')) return;
+    const [cmd, ...args] = message.content.slice(1).trim().split(/\s+/);
 
-    if (content === '$rank') {
-      const user = await db.get('SELECT xp_text, level_text, xp_vc, level_vc FROM users WHERE id = ?', [message.author.id]);
-      if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
+    try {
+      // $rank / $stats
+      if (cmd === 'rank' || cmd === 'stats') {
+        const user = await db.get('SELECT xp_text, level_text, xp_vc, level_vc FROM users WHERE id = ?', [message.author.id]);
+        if (!user) return message.channel.send(`You have no XP yet, ${message.author}.`);
 
-      const embed = new EmbedBuilder()
-        .setTitle(`${message.author.username}'s Rank`)
-        .setColor('Red')
-        .addFields(
-          { name: '💬 Chat Level', value: `${user.level_text}`, inline: true },
-          { name: '✉️ Chat XP', value: `${user.xp_text}`, inline: true },
-          { name: '🎧 VC Level', value: `${user.level_vc}`, inline: true },
-          { name: '⏱️ VC XP', value: `${user.xp_vc}`, inline: true }
-        )
-        .setTimestamp();
+        const embed = new EmbedBuilder()
+          .setTitle(`${message.author.username}'s Rank`)
+          .setColor('Red')
+          .addFields(
+            { name: '💬 Chat Level', value: `${user.level_text || 1}`, inline: true },
+            { name: '✉️ Chat XP', value: `${user.xp_text || 0}`, inline: true },
+            { name: '🎧 VC Level', value: `${user.level_vc || 1}`, inline: true },
+            { name: '⏱️ VC Hours', value: `${formatHours(user.xp_vc || 0)}`, inline: true }
+          )
+          .setTimestamp();
 
-      await message.channel.send({ embeds: [embed] });
-    }
+        return message.channel.send({ embeds: [embed] });
+      }
 
-    if (content === '$help') {
-      if (message._helpSent) return;
-      message._helpSent = true;
-      await message.channel.send(`Commands:\n$rank — Show your rank\n$leaderboard — Show VC leaderboard\n$join — Join VC tracking`);
-      setTimeout(() => { message._helpSent = false; }, 3000);
+      // $leaderboard
+      if (cmd === 'leaderboard') return updateVcLeaderboard();
+
+      // $help
+      if (cmd === 'help') {
+        if (helpCooldown.has(message.author.id)) return;
+        helpCooldown.add(message.author.id);
+        await message.channel.send(
+          '🛠 **Available Commands:**\n' +
+          '`$join` — Bot joins VC\n' +
+          '`$leave` — Bot leaves VC\n' +
+          '`$play <url>` — Play music\n' +
+          '`$setstatus <text>` — Set VC status\n' +
+          '`$clearstatus` — Clear VC status\n' +
+          '`$scan` — Scan links\n' +
+          '`$lock` — Lock VC temporarily\n' +
+          '`$clear` — Clear all locks/timers\n' +
+          '`$rank` / `$stats` — Show your rank\n' +
+          '`$leaderboard` — Show VC leaderboard'
+        );
+        setTimeout(() => helpCooldown.delete(message.author.id), 3000);
+      }
+    } catch (err) {
+      console.error('[LEVELING COMMAND ERROR]', err);
+      message.reply('❌ An error occurred while executing that command.');
     }
   });
 }
