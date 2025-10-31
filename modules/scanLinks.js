@@ -1,4 +1,4 @@
-// 🔗 scanLinks.js v2.4 — DexVyBz Poaching Enforcement
+// 🔗 scanLinks.js v2.5 — DexVyBz Poaching Enforcement
 import { EmbedBuilder, Colors, PermissionsBitField } from 'discord.js';
 
 const POACHING_LINK_PREFIX = 'https://discord.gg/';
@@ -7,7 +7,7 @@ const APPEAL_LINK = 'https://discord.gg/cKDnHGscmw';
 const SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export default async function setupScanLinks(client, db) {
+export default async function setupScanLinks(client, db, manualTriggerMessage = null) {
   if (!db) return console.error('[SCANLINKS] Database not initialized');
 
   // ===== Ensure tables exist =====
@@ -29,7 +29,7 @@ export default async function setupScanLinks(client, db) {
     )
   `);
 
-  const logChannelId = '1358627364132884690'; // Your existing logging channel
+  const logChannelId = '1358627364132884690';
 
   // ===== Helper: enforce a user =====
   async function enforceUser(member, foundLink) {
@@ -45,7 +45,7 @@ export default async function setupScanLinks(client, db) {
 
     const embed = new EmbedBuilder()
       .setTitle('⚠️ Poaching Link Detected')
-      .setDescription(`User: ${member.user.tag}\nLink: ${foundLink}\nAction: 24h Timeout\nRemove the link within 24hrs or face a ban`)
+      .setDescription(`User: ${member.user.tag}\nLink: ${foundLink}\nAction: 24h Timeout`)
       .setColor(Colors.Red)
       .setTimestamp();
 
@@ -54,10 +54,8 @@ export default async function setupScanLinks(client, db) {
 
     // DM user
     try {
-      await member.send(`🚨 You have a link in your bio (${foundLink}) that violates our server rules. You have 24 hours to remove it. If you fail, you will be banned. Appeal: ${APPEAL_LINK}`);
-    } catch (err) {
-      console.log(`[SCANLINKS] DM failed for ${member.user.tag}, continuing with punishment`);
-    }
+      await member.send(`🚨 You have a link in your bio (${foundLink}) violating our rules. Remove within 24h or face a ban. Appeal: ${APPEAL_LINK}`);
+    } catch {}
 
     // Apply 24h timeout
     try {
@@ -78,10 +76,8 @@ export default async function setupScanLinks(client, db) {
   }
 
   // ===== Main scan function =====
-  async function scanAllMembers(manual = false, triggerMessage = null) {
-    let scanned = 0;
-    let detected = 0;
-    let timedOut = 0;
+  async function scanAllMembers() {
+    let scanned = 0, detected = 0, timedOut = 0;
 
     const guilds = client.guilds.cache;
     for (const guild of guilds.values()) {
@@ -101,9 +97,8 @@ export default async function setupScanLinks(client, db) {
         const violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
 
         if (violator && violator.repeatOffense >= 1) {
-          // Already timed out before → ban
           try {
-            await member.send(`❌ You have repeated the poaching violation. You are being banned. Appeal: ${APPEAL_LINK}`);
+            await member.send(`❌ Repeated poaching violation. You are being banned. Appeal: ${APPEAL_LINK}`);
           } catch {}
           await member.ban({ reason: 'Repeated poaching link in bio' }).catch(() => null);
         } else {
@@ -113,25 +108,17 @@ export default async function setupScanLinks(client, db) {
       }
     }
 
-    if (manual && triggerMessage) {
-      triggerMessage.reply(`✅ Scan complete. Members scanned: ${scanned}, Links detected: ${detected}, Timeouts applied: ${timedOut}`);
+    if (manualTriggerMessage) {
+      manualTriggerMessage.reply(`✅ Scan complete. Members scanned: ${scanned}, Links detected: ${detected}, Timeouts applied: ${timedOut}`);
     }
 
     console.log(`[SCANLINKS] Scan finished. Scanned: ${scanned}, Detected: ${detected}, Timeouts: ${timedOut}`);
   }
 
-  // ===== Manual $scan command =====
-  client.on('messageCreate', async message => {
-    if (!message.content.startsWith('$scan') || message.author.bot) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply('❌ Only admins can run this command.');
-    }
-
-    await scanAllMembers(true, message);
-  });
-
-  // ===== Auto scan interval =====
+  // ===== Run scan on interval =====
   setInterval(scanAllMembers, SCAN_INTERVAL_MS);
 
-  console.log('✅ ScanLinks Module active (v2.4) — Poaching enforcement enabled');
+  // ===== Run immediately if manual trigger =====
+  if (manualTriggerMessage) await scanAllMembers();
+  console.log('✅ ScanLinks Module active (v2.5) — Poaching enforcement enabled');
 }
