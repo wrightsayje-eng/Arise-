@@ -1,4 +1,4 @@
-// 🔗 scanLinks.js v2.6 — DexVyBz Poaching Enforcement (Patched for async DB)
+// 🔗 scanLinks.js v2.6 — DexVyBz Poaching Enforcement (Fixed User Bio Fetch)
 import { EmbedBuilder, Colors, PermissionsBitField } from 'discord.js';
 
 const POACHING_LINK_PREFIX = 'https://discord.gg/';
@@ -6,35 +6,43 @@ const ALLOWED_SERVER = 'theplug18'; // Only allow this server
 const APPEAL_LINK = 'https://discord.gg/cKDnHGscmw';
 const SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const FETCH_DELAY_MS = 200; // Delay between user fetches to avoid rate limits
 
 export default async function setupScanLinks(client, db, manualTriggerMessage = null) {
   if (!db) return console.error('[SCANLINKS] Database not initialized');
 
   // ===== Ensure tables exist =====
-  await db.run(`CREATE TABLE IF NOT EXISTS poachingViolators (
-    user_id TEXT PRIMARY KEY,
-    firstDetected INTEGER,
-    repeatOffense INTEGER DEFAULT 0,
-    timeoutExpires INTEGER DEFAULT 0
-  );`);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS poachingViolators (
+      user_id TEXT PRIMARY KEY,
+      firstDetected INTEGER,
+      repeatOffense INTEGER DEFAULT 0,
+      timeoutExpires INTEGER DEFAULT 0
+    )
+  `);
 
-  await db.run(`CREATE TABLE IF NOT EXISTS poachingViolationsHistory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    detectedLink TEXT NOT NULL,
-    detectedAt INTEGER NOT NULL
-  );`);
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS poachingViolationsHistory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      detectedLink TEXT NOT NULL,
+      detectedAt INTEGER NOT NULL
+    )
+  `);
 
   const logChannelId = '1358627364132884690';
 
   // ===== Helper: enforce a user =====
   async function enforceUser(member, foundLink) {
     const now = Date.now();
-    const violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
+    let violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
     const repeat = violator ? violator.repeatOffense + 1 : 0;
 
     // Save violation history
-    await db.run('INSERT INTO poachingViolationsHistory(user_id, detectedLink, detectedAt) VALUES (?, ?, ?)', [member.id, foundLink, now]);
+    await db.run(
+      'INSERT INTO poachingViolationsHistory(user_id, detectedLink, detectedAt) VALUES (?, ?, ?)',
+      [member.id, foundLink, now]
+    );
 
     const embed = new EmbedBuilder()
       .setTitle('⚠️ Poaching Link Detected')
@@ -74,11 +82,14 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
 
     for (const guild of client.guilds.cache.values()) {
       await guild.members.fetch();
+
       for (const member of guild.members.cache.values()) {
         if (member.user.bot) continue;
         scanned++;
 
-        const bio = member.user?.bio || '';
+        // Explicitly fetch user to get bio
+        const user = await member.user.fetch().catch(() => member.user);
+        const bio = user?.bio || '';
         const match = bio.match(/https:\/\/discord\.gg\/[a-zA-Z0-9]+/gi);
         if (!match) continue;
 
@@ -97,6 +108,9 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
           await enforceUser(member, poachingLink);
           timedOut++;
         }
+
+        // Delay to reduce risk of rate limiting
+        await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
       }
     }
 
@@ -113,4 +127,12 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
   // ===== Run immediately if manual trigger =====
   if (manualTriggerMessage) await scanAllMembers();
   console.log('✅ ScanLinks Module active (v2.6) — Poaching enforcement enabled');
+
+  // ===== Admin-only $scan command =====
+  client.on('messageCreate', async message => {
+    if (!message.content.startsWith('$scan') || message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    await scanAllMembers();
+  });
 }
