@@ -1,4 +1,4 @@
-// 🔗 scanLinks.js v2.5 — DexVyBz Poaching Enforcement
+// 🔗 scanLinks.js v2.6 — DexVyBz Poaching Enforcement (Patched for async DB)
 import { EmbedBuilder, Colors, PermissionsBitField } from 'discord.js';
 
 const POACHING_LINK_PREFIX = 'https://discord.gg/';
@@ -11,37 +11,30 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
   if (!db) return console.error('[SCANLINKS] Database not initialized');
 
   // ===== Ensure tables exist =====
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS poachingViolators (
-      user_id TEXT PRIMARY KEY,
-      firstDetected INTEGER,
-      repeatOffense INTEGER DEFAULT 0,
-      timeoutExpires INTEGER DEFAULT 0
-    )
-  `);
+  await db.run(`CREATE TABLE IF NOT EXISTS poachingViolators (
+    user_id TEXT PRIMARY KEY,
+    firstDetected INTEGER,
+    repeatOffense INTEGER DEFAULT 0,
+    timeoutExpires INTEGER DEFAULT 0
+  );`);
 
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS poachingViolationsHistory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      detectedLink TEXT NOT NULL,
-      detectedAt INTEGER NOT NULL
-    )
-  `);
+  await db.run(`CREATE TABLE IF NOT EXISTS poachingViolationsHistory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    detectedLink TEXT NOT NULL,
+    detectedAt INTEGER NOT NULL
+  );`);
 
   const logChannelId = '1358627364132884690';
 
   // ===== Helper: enforce a user =====
   async function enforceUser(member, foundLink) {
     const now = Date.now();
-    let violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
+    const violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
     const repeat = violator ? violator.repeatOffense + 1 : 0;
 
     // Save violation history
-    await db.run(
-      'INSERT INTO poachingViolationsHistory(user_id, detectedLink, detectedAt) VALUES (?, ?, ?)',
-      [member.id, foundLink, now]
-    );
+    await db.run('INSERT INTO poachingViolationsHistory(user_id, detectedLink, detectedAt) VALUES (?, ?, ?)', [member.id, foundLink, now]);
 
     const embed = new EmbedBuilder()
       .setTitle('⚠️ Poaching Link Detected')
@@ -79,8 +72,7 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
   async function scanAllMembers() {
     let scanned = 0, detected = 0, timedOut = 0;
 
-    const guilds = client.guilds.cache;
-    for (const guild of guilds.values()) {
+    for (const guild of client.guilds.cache.values()) {
       await guild.members.fetch();
       for (const member of guild.members.cache.values()) {
         if (member.user.bot) continue;
@@ -120,5 +112,5 @@ export default async function setupScanLinks(client, db, manualTriggerMessage = 
 
   // ===== Run immediately if manual trigger =====
   if (manualTriggerMessage) await scanAllMembers();
-  console.log('✅ ScanLinks Module active (v2.5) — Poaching enforcement enabled');
+  console.log('✅ ScanLinks Module active (v2.6) — Poaching enforcement enabled');
 }
