@@ -7,7 +7,7 @@ export default async function setupCommands(client, db) {
   if (!client) throw new Error('[COMMANDS] Discord client not provided');
   if (!db) throw new Error('[COMMANDS] Database not provided');
 
-  // Initialize leveling module
+  // Initialize leveling module (handles XP, ranks, leaderboard)
   await setupLeveling(client, db);
 
   const helpCooldown = new Map(); // Prevent duplicate $help spam
@@ -36,7 +36,7 @@ export default async function setupCommands(client, db) {
             '`$play <url>` - Play music\n' +
             '`$setstatus <text>` - Set VC status\n' +
             '`$clearstatus` - Clear VC status\n' +
-            '`$scan` - Scan user bios for poaching links (Admin only)\n' +
+            '`$scan` - Scan bio links\n' +
             '`$lock` - Lock VC temporarily\n' +
             '`$clear` - Clear all locks and timers\n' +
             '`$rank` - Show your chat & VC rank\n' +
@@ -108,8 +108,7 @@ export default async function setupCommands(client, db) {
         try {
           const scanLinksModule = await import('./scanLinks.js');
           if (scanLinksModule.default) {
-            // Manual trigger: pass the message so the module can respond
-            await scanLinksModule.default(client, db, true, message);
+            await scanLinksModule.default(client, db, message);
             console.log(`[SCAN] Manual scan triggered by ${message.author.tag}`);
           }
         } catch (err) {
