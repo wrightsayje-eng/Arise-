@@ -1,4 +1,4 @@
-// 🟢 index.js v1.7.1 — DexVyBz v15-ready with clientReady & full DB support
+// 🟢 index.js v1.8 — DexVyBz v15-ready with clientReady, full DB support, ScanLinks integrated
 import { Client, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from './data/sqliteDatabase.js';
 import dotenv from 'dotenv';
@@ -19,13 +19,13 @@ const client = new Client({
   partials: ['CHANNEL', 'GUILD_MEMBER', 'MESSAGE'],
 });
 
-// Increase max listeners to prevent warnings
+// Increase max listeners
 client.setMaxListeners(20);
 
 // ===== Minimal Web Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req,res) => res.send('🌐 DexVyBz v1.7.1 Beta online ✅'));
+app.get('/', (req, res) => res.send('🌐 DexVyBz v1.8 Beta online ✅'));
 app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
 // ===== Verbose Logging =====
@@ -69,7 +69,7 @@ process.on('unhandledRejection', (reason) => {
       // Emit custom ready event for v15 module loading
       client.emit('clientReady');
 
-      // ===== Load all modules safely =====
+      // ===== Load modules safely =====
       await loadModuleSafe('./modules/commandHandler.js', client, db);
       await loadModuleSafe('./modules/lfSquad.js', client, db);
       await loadModuleSafe('./modules/chatInteraction.js', client, db);
@@ -77,6 +77,11 @@ process.on('unhandledRejection', (reason) => {
       await loadModuleSafe('./modules/antiPermAbuse.js', client, db);
       await loadModuleSafe('./modules/musicCommands.js', client, db);
       await loadModuleSafe('./modules/logging.js', client, db);
+
+      // ===== Load ScanLinks for auto scanning =====
+      const scanLinksModule = await import('./modules/scanLinks.js');
+      if (scanLinksModule.default) await scanLinksModule.default(client, db);
+      console.log(chalk.green('✅ ScanLinks module loaded and active'));
 
       console.log(chalk.green('✅ All modules loaded successfully'));
     });
