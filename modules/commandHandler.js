@@ -1,4 +1,4 @@
-// commandHandler.js v1.7 — DexVyBz Patched
+// commandHandler.js v1.8 — DexVyBz Patched
 import { EmbedBuilder } from 'discord.js';
 import antiPermAbuse from './antiPermAbuse.js';
 import setupLeveling from './leveling.js';
@@ -98,13 +98,36 @@ export default async function setupCommands(client, db) {
       }
 
       // =========================
+      // $scan - Manual bio scan (admin only)
+      // =========================
+      if (cmd === 'scan') {
+        if (!message.member.permissions.has('Administrator')) {
+          return message.reply('❌ Only admins can run this command.');
+        }
+
+        try {
+          const scanLinksModule = await import('./scanLinks.js');
+          if (scanLinksModule.default) {
+            // Manual trigger: pass the message so it can respond
+            await scanLinksModule.default(client, message, true);
+            console.log(`[SCAN] Manual scan triggered by ${message.author.tag}`);
+          }
+        } catch (err) {
+          console.error('[SCAN] Failed to run manual scan:', err);
+          message.reply('❌ Scan failed to execute.');
+        }
+
+        return;
+      }
+
+      // =========================
       // $rank and $leaderboard
       // Handled in leveling.js
       // =========================
       if (cmd === 'rank' || cmd === 'leaderboard') return;
 
       // =========================
-      // Other commands (join, leave, play, scan, lock) can be added below
+      // Other commands (join, leave, play, lock) can be added below
       // =========================
 
     } catch (err) {
