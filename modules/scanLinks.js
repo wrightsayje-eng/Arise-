@@ -1,122 +1,137 @@
-// 🔗 scanLinks.js v2.0 Pro — Scan User Bios for Poaching Links
+// 🔗 scanLinks.js v2.4 — DexVyBz Poaching Enforcement
 import { EmbedBuilder, Colors, PermissionsBitField } from 'discord.js';
-import fetch from 'node-fetch';
-import chalk from 'chalk';
 
-const AUTO_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const WHITELISTED_LINK = '.gg/theplug18';
-const LOG_CHANNEL_ID = '1358627364132884690'; // same channel you already have
+const POACHING_LINK_PREFIX = 'https://discord.gg/';
+const ALLOWED_SERVER = 'theplug18'; // Only allow this server
+const APPEAL_LINK = 'https://discord.gg/cKDnHGscmw';
+const SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/**
- * Fetch a member's server profile bio
- */
-async function getUserBio(client, userId, guildId) {
-  try {
-    const res = await fetch(`https://discord.com/api/v10/users/${userId}/profile?guild_id=${guildId}`, {
-      headers: {
-        Authorization: `Bot ${client.token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) return '';
-    const data = await res.json();
-    return data.bio || '';
-  } catch (err) {
-    console.error(chalk.red('[SCAN LINKS] Failed to fetch bio:'), err);
-    return '';
-  }
-}
+export default async function setupScanLinks(client, db) {
+  if (!db) return console.error('[SCANLINKS] Database not initialized');
 
-/**
- * Scan a single user for server links
- */
-async function scanMember(client, member) {
-  const bio = await getUserBio(client, member.id, member.guild.id);
-  if (!bio) return null;
+  // ===== Ensure tables exist =====
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS poachingViolators (
+      user_id TEXT PRIMARY KEY,
+      firstDetected INTEGER,
+      repeatOffense INTEGER DEFAULT 0,
+      timeoutExpires INTEGER DEFAULT 0
+    )
+  `);
 
-  const matches = bio.match(/discord\.gg\/\S+/gi) || [];
-  const offendingLinks = matches.filter(l => !l.includes(WHITELISTED_LINK));
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS poachingViolationsHistory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      detectedLink TEXT NOT NULL,
+      detectedAt INTEGER NOT NULL
+    )
+  `);
 
-  return offendingLinks.length ? { member, links: offendingLinks } : null;
-}
+  const logChannelId = '1358627364132884690'; // Your existing logging channel
 
-/**
- * Handle punishment & DM
- */
-async function punishMember(client, member, links) {
-  const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+  // ===== Helper: enforce a user =====
+  async function enforceUser(member, foundLink) {
+    const now = Date.now();
+    let violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
+    const repeat = violator ? violator.repeatOffense + 1 : 0;
 
-  const embed = new EmbedBuilder()
-    .setTitle('🚨 Poaching Link Detected')
-    .setColor(Colors.Red)
-    .setDescription(`User: ${member.user.tag}\nLinks: ${links.join(', ')}`)
-    .setTimestamp();
-
-  if (logChannel) await logChannel.send({ embeds: [embed] });
-
-  // DM user
-  try {
-    await member.send(
-      `⚠️ You have links in your server bio that violate our anti-poaching policy: ${links.join(', ')}.\n` +
-      `You have 24 hours to remove them, or you will be timed out.`
+    // Save violation history
+    await db.run(
+      'INSERT INTO poachingViolationsHistory(user_id, detectedLink, detectedAt) VALUES (?, ?, ?)',
+      [member.id, foundLink, now]
     );
-  } catch {
-    console.log(chalk.yellow(`[SCAN LINKS] Could not DM ${member.user.tag}`));
+
+    const embed = new EmbedBuilder()
+      .setTitle('⚠️ Poaching Link Detected')
+      .setDescription(`User: ${member.user.tag}\nLink: ${foundLink}\nAction: 24h Timeout\nRemove the link within 24hrs or face a ban`)
+      .setColor(Colors.Red)
+      .setTimestamp();
+
+    const logChannel = await client.channels.fetch(logChannelId).catch(() => null);
+    if (logChannel?.isTextBased()) await logChannel.send({ embeds: [embed] });
+
+    // DM user
+    try {
+      await member.send(`🚨 You have a link in your bio (${foundLink}) that violates our server rules. You have 24 hours to remove it. If you fail, you will be banned. Appeal: ${APPEAL_LINK}`);
+    } catch (err) {
+      console.log(`[SCANLINKS] DM failed for ${member.user.tag}, continuing with punishment`);
+    }
+
+    // Apply 24h timeout
+    try {
+      await member.timeout(TIMEOUT_DURATION_MS, 'Poaching link detected');
+    } catch (err) {
+      console.error(`[SCANLINKS] Failed to timeout ${member.user.tag}:`, err);
+    }
+
+    // Update DB
+    await db.run(
+      `INSERT INTO poachingViolators(user_id, firstDetected, repeatOffense, timeoutExpires)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+       repeatOffense=excluded.repeatOffense,
+       timeoutExpires=excluded.timeoutExpires`,
+      [member.id, now, repeat, now + TIMEOUT_DURATION_MS]
+    );
   }
 
-  // Timeout 24 hours
-  try {
-    await member.timeout(24 * 60 * 60 * 1000, 'Poaching link detected in bio');
-    console.log(chalk.green(`[SCAN LINKS] Timed out ${member.user.tag} for 24 hours`));
-  } catch (err) {
-    console.error(`[SCAN LINKS] Failed to timeout ${member.user.tag}:`, err);
-  }
+  // ===== Main scan function =====
+  async function scanAllMembers(manual = false, triggerMessage = null) {
+    let scanned = 0;
+    let detected = 0;
+    let timedOut = 0;
 
-  return true;
-}
+    const guilds = client.guilds.cache;
+    for (const guild of guilds.values()) {
+      await guild.members.fetch();
+      for (const member of guild.members.cache.values()) {
+        if (member.user.bot) continue;
+        scanned++;
 
-/**
- * Run full scan across guild
- */
-export default async function scanLinks(client) {
-  const runScan = async (manualTrigger = false, initiator = null) => {
-    const guild = client.guilds.cache.first();
-    if (!guild) return console.error('[SCAN LINKS] No guild found');
+        const bio = member.user?.bio || '';
+        const match = bio.match(/https:\/\/discord\.gg\/[a-zA-Z0-9]+/gi);
+        if (!match) continue;
 
-    console.log(chalk.blue(`[SCAN LINKS] Starting ${manualTrigger ? 'manual' : 'auto'} scan...`));
+        const poachingLink = match.find(link => !link.includes(ALLOWED_SERVER));
+        if (!poachingLink) continue;
 
-    const members = await guild.members.fetch();
-    let totalScanned = 0;
-    let totalOffenders = 0;
+        detected++;
+        const violator = await db.get('SELECT * FROM poachingViolators WHERE user_id = ?', [member.id]);
 
-    for (const [id, member] of members) {
-      if (member.user.bot) continue;
-      totalScanned++;
-
-      const offending = await scanMember(client, member);
-      if (offending) {
-        totalOffenders++;
-        await punishMember(client, offending.member, offending.links);
+        if (violator && violator.repeatOffense >= 1) {
+          // Already timed out before → ban
+          try {
+            await member.send(`❌ You have repeated the poaching violation. You are being banned. Appeal: ${APPEAL_LINK}`);
+          } catch {}
+          await member.ban({ reason: 'Repeated poaching link in bio' }).catch(() => null);
+        } else {
+          await enforceUser(member, poachingLink);
+          timedOut++;
+        }
       }
     }
 
-    console.log(chalk.green(`[SCAN LINKS] Scan complete. Scanned ${totalScanned}, offenders: ${totalOffenders}`));
-
-    if (manualTrigger && initiator) {
-      initiator.send(`✅ Manual scan complete. Scanned **${totalScanned}** members, found **${totalOffenders}** violations.`);
+    if (manual && triggerMessage) {
+      triggerMessage.reply(`✅ Scan complete. Members scanned: ${scanned}, Links detected: ${detected}, Timeouts applied: ${timedOut}`);
     }
-  };
 
-  // Auto scan every 6 hours
-  setInterval(runScan, AUTO_SCAN_INTERVAL_MS);
+    console.log(`[SCANLINKS] Scan finished. Scanned: ${scanned}, Detected: ${detected}, Timeouts: ${timedOut}`);
+  }
 
-  // Admin-only $scan command
-  client.on('messageCreate', async (message) => {
-    if (!message.content.toLowerCase().startsWith('$scan')) return;
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+  // ===== Manual $scan command =====
+  client.on('messageCreate', async message => {
+    if (!message.content.startsWith('$scan') || message.author.bot) return;
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply('❌ Only admins can run this command.');
+    }
 
-    await runScan(true, message.channel);
+    await scanAllMembers(true, message);
   });
 
-  console.log('✅ Bio Scan Module active (v2.0 Pro)');
+  // ===== Auto scan interval =====
+  setInterval(scanAllMembers, SCAN_INTERVAL_MS);
+
+  console.log('✅ ScanLinks Module active (v2.4) — Poaching enforcement enabled');
 }
