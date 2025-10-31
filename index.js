@@ -1,4 +1,4 @@
-// 🟢 index.js v1.8 — DexVyBz v15-ready with clientReady, full DB support, ScanLinks integrated
+// 🟢 index.js v1.9 — DexVyBz v15-ready with clientReady, full DB support, ScanLinks integrated
 import { Client, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from './data/sqliteDatabase.js';
 import dotenv from 'dotenv';
@@ -25,7 +25,7 @@ client.setMaxListeners(20);
 // ===== Minimal Web Server =====
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('🌐 DexVyBz v1.8 Beta online ✅'));
+app.get('/', (req, res) => res.send('🌐 DexVyBz v1.9 Beta online ✅'));
 app.listen(PORT, () => console.log(`🌐 Web server running on port ${PORT}`));
 
 // ===== Verbose Logging =====
