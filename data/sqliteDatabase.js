@@ -1,4 +1,4 @@
-// sqliteDatabase.js v0.6 — DexVyBz
+// sqliteDatabase.js v0.7 — DexVyBz with Doorman support
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
@@ -28,7 +28,7 @@ export function initDatabase() {
     try {
       await db.exec('PRAGMA foreign_keys = ON;');
 
-      // ===== Ensure correct users table exists for leveling.js =====
+      // ===== users table (leveling) =====
       await db.exec(`
         CREATE TABLE IF NOT EXISTS users (
           id TEXT PRIMARY KEY,
@@ -39,9 +39,9 @@ export function initDatabase() {
           level_vc INTEGER DEFAULT 1
         )
       `);
-      console.log(chalk.green('[DB] users table ensured with leveling schema'));
+      console.log(chalk.green('[DB] users table ensured'));
 
-      // ===== Other tables from your original schema =====
+      // ===== Other existing tables =====
       await db.exec(`
         CREATE TABLE IF NOT EXISTS vc_activity (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +88,37 @@ export function initDatabase() {
         );
       `);
       console.log(chalk.green('[DB] Other tables ensured'));
+
+      // ===== Doorman module tables =====
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS doormanPasswords (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          password TEXT UNIQUE,
+          description TEXT,
+          maxUses INTEGER,
+          uses INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS doormanUsers (
+          user_id TEXT PRIMARY KEY,
+          password_id INTEGER,
+          grantedAt INTEGER,
+          FOREIGN KEY(password_id) REFERENCES doormanPasswords(id)
+        );
+      `);
+      console.log(chalk.green('[DB] Doorman tables ensured'));
+
+      // ===== Pre-fill default passwords =====
+      const existing = await db.all('SELECT * FROM doormanPasswords');
+      if (existing.length === 0) {
+        await db.run(`
+          INSERT INTO doormanPasswords (password, description, maxUses, uses) VALUES
+            ('I love boobies', 'Normal VC perms', 15, 0),
+            ('Fuck Pogi', 'Normal VC perms + mute/deafen', 6, 0),
+            ('Loyalty Equals Royalty', 'Normal VC perms + mute/deafen + drag ability', 6, 0)
+        `);
+        console.log(chalk.green('[DB] Doorman default passwords inserted'));
+      }
 
     } catch (err) {
       console.error(chalk.red('[DB] Failed to initialize tables:'), err);
