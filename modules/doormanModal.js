@@ -1,18 +1,15 @@
-// modules/doormanModal.js
+// modules/doormanModal.js (v2)
 import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, PermissionsBitField } from 'discord.js';
-
-const PASSWORDS = {
-    "I love boobies": { level: 1, maxUses: 15, used: 0 },
-    "Fuck Pogi": { level: 2, maxUses: 6, used: 0 },
-    "Loyalty Equals Royalty": { level: 3, maxUses: 6, used: 0 }
-};
+import { getDatabase } from '../data/sqliteDatabase.js'; // <-- use your existing DB helper
 
 const SECRET_VC_ID = '1434698733320273982';
 
-export default async function setupDoorman(client, db) {
+export default async function setupDoorman(client) {
 
     client.on('interactionCreate', async interaction => {
         if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+
+        const db = await getDatabase();
 
         // ===== Button click → open modal =====
         if (interaction.isButton() && interaction.customId === 'open_password_modal') {
@@ -36,20 +33,21 @@ export default async function setupDoorman(client, db) {
         // ===== Modal submit =====
         if (interaction.isModalSubmit() && interaction.customId === 'doorman_password_modal') {
             const pw = interaction.fields.getTextInputValue('password').trim();
-            const entry = PASSWORDS[pw];
 
+            // Fetch password entry from DB
+            const entry = await db.get(`SELECT * FROM doorman_passwords WHERE password = ?`, [pw]);
             if (!entry) {
                 await interaction.reply({ content: '❌ Invalid password.', ephemeral: true });
                 return;
             }
 
-            if (entry.used >= entry.maxUses) {
+            if (entry.used >= entry.max_uses) {
                 await interaction.reply({ content: '⚠️ This password has been used up. Ask someone to drag you.', ephemeral: true });
                 return;
             }
 
-            // Increment use
-            entry.used += 1;
+            // Increment use count in DB
+            await db.run(`UPDATE doorman_passwords SET used = used + 1 WHERE password = ?`, [pw]);
 
             // Give VC perms
             const guild = interaction.guild;
@@ -76,7 +74,8 @@ export default async function setupDoorman(client, db) {
 
             await vc.permissionOverwrites.edit(member.id, { Allow: perms });
 
-            await interaction.reply({ content: `✅ Access granted! You can join the secret VC. Remaining uses: ${entry.maxUses - entry.used}`, ephemeral: true });
+            const remaining = entry.max_uses - entry.used - 1; // minus this use
+            await interaction.reply({ content: `✅ Access granted! You can join the secret VC. Remaining uses: ${remaining}`, ephemeral: true });
         }
     });
 
