@@ -1,82 +1,79 @@
-// modules/doormanModal.js (v2)
-import { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, PermissionsBitField } from 'discord.js';
-import { getDatabase } from '../data/sqliteDatabase.js'; // <-- use your existing DB helper
+// 🟢 doormanModal.js — DexVyBz Doorman VC Modal Logic
+import { Events, PermissionsBitField } from 'discord.js';
 
-const SECRET_VC_ID = '1434698733320273982';
+export default async function setupDoormanModal(client, db) {
+  const SECRET_VC_ID = '1434698733320273982';
 
-export default async function setupDoorman(client) {
+  // Passwords and usage limits
+  const passwords = [
+    { text: 'I love boobies', perms: ['VIEW_CHANNEL'], maxUses: 15 },
+    { text: 'Fuck Pogi', perms: ['VIEW_CHANNEL', 'MUTE_MEMBERS', 'DEAFEN_MEMBERS'], maxUses: 6 },
+    { text: 'Loyalty Equals Royalty', perms: ['VIEW_CHANNEL', 'MUTE_MEMBERS', 'DEAFEN_MEMBERS', 'MOVE_MEMBERS'], maxUses: 6 }
+  ];
 
-    client.on('interactionCreate', async interaction => {
-        if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+  // Ensure DB table exists for usage tracking
+  await db.run(`
+    CREATE TABLE IF NOT EXISTS doormanPasswords (
+      password TEXT PRIMARY KEY,
+      uses INTEGER DEFAULT 0,
+      maxUses INTEGER
+    )
+  `);
 
-        const db = await getDatabase();
+  // Initialize table values
+  for (const p of passwords) {
+    await db.run(
+      `INSERT OR IGNORE INTO doormanPasswords(password, uses, maxUses) VALUES (?, 0, ?)`,
+      [p.text, p.maxUses]
+    );
+  }
 
-        // ===== Button click → open modal =====
-        if (interaction.isButton() && interaction.customId === 'open_password_modal') {
-            const modal = new ModalBuilder()
-                .setCustomId('doorman_password_modal')
-                .setTitle('Enter Doorman Password');
+  // Handle modal submission
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isModalSubmit()) return;
+    if (interaction.customId !== 'doormanModal') return;
 
-            const passwordInput = new TextInputBuilder()
-                .setCustomId('password')
-                .setLabel('Password')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Enter your password')
-                .setRequired(true);
+    const input = interaction.fields.getTextInputValue('vcPassword').trim();
 
-            const row = new ActionRowBuilder().addComponents(passwordInput);
-            modal.addComponents(row);
+    // Fetch DB entry
+    const entry = await db.get(`SELECT * FROM doormanPasswords WHERE password = ?`, [input]);
+    if (!entry) {
+      await interaction.reply({ content: '❌ Invalid password.', ephemeral: true });
+      return;
+    }
 
-            await interaction.showModal(modal);
-        }
+    if (entry.uses >= entry.maxUses) {
+      await interaction.reply({ content: '⚠️ This password has been fully used. Contact staff to be moved manually.', ephemeral: true });
+      return;
+    }
 
-        // ===== Modal submit =====
-        if (interaction.isModalSubmit() && interaction.customId === 'doorman_password_modal') {
-            const pw = interaction.fields.getTextInputValue('password').trim();
+    // Determine perms
+    const passwordObj = passwords.find(p => p.text === input);
+    const member = interaction.member;
 
-            // Fetch password entry from DB
-            const entry = await db.get(`SELECT * FROM doorman_passwords WHERE password = ?`, [pw]);
-            if (!entry) {
-                await interaction.reply({ content: '❌ Invalid password.', ephemeral: true });
-                return;
-            }
+    const secretVC = await interaction.guild.channels.fetch(SECRET_VC_ID);
+    if (!secretVC?.isVoiceBased()) {
+      await interaction.reply({ content: '❌ Secret VC not found.', ephemeral: true });
+      return;
+    }
 
-            if (entry.used >= entry.max_uses) {
-                await interaction.reply({ content: '⚠️ This password has been used up. Ask someone to drag you.', ephemeral: true });
-                return;
-            }
+    // Update permissions
+    const permsToApply = {};
+    for (const perm of passwordObj.perms) {
+      permsToApply[perm] = true;
+    }
 
-            // Increment use count in DB
-            await db.run(`UPDATE doorman_passwords SET used = used + 1 WHERE password = ?`, [pw]);
+    await secretVC.permissionOverwrites.edit(member, permsToApply);
 
-            // Give VC perms
-            const guild = interaction.guild;
-            const member = interaction.member;
-            const vc = guild.channels.cache.get(SECRET_VC_ID);
+    // Move member if in another VC
+    if (member.voice.channelId) {
+      await member.voice.setChannel(secretVC).catch(() => {});
+    }
 
-            if (!vc) {
-                await interaction.reply({ content: '❌ Secret VC not found.', ephemeral: true });
-                return;
-            }
+    // Increment usage
+    await db.run(`UPDATE doormanPasswords SET uses = uses + 1 WHERE password = ?`, [input]);
 
-            let perms = [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.Connect,
-            ];
-
-            if (entry.level >= 2) {
-                perms.push(PermissionsBitField.Flags.MuteMembers, PermissionsBitField.Flags.DeafenMembers);
-            }
-
-            if (entry.level >= 3) {
-                perms.push(PermissionsBitField.Flags.MoveMembers);
-            }
-
-            await vc.permissionOverwrites.edit(member.id, { Allow: perms });
-
-            const remaining = entry.max_uses - entry.used - 1; // minus this use
-            await interaction.reply({ content: `✅ Access granted! You can join the secret VC. Remaining uses: ${remaining}`, ephemeral: true });
-        }
-    });
-
+    // Reply ephemeral and delete modal
+    await interaction.reply({ content: `✅ Access granted! Enjoy the secret VC.`, ephemeral: true });
+  });
 }
